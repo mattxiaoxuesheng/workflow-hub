@@ -81,3 +81,31 @@ class PodcastTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+class MusicTests(unittest.TestCase):
+    @unittest.skipUnless(shutil.which('ffmpeg') and shutil.which('ffprobe'), 'requires ffmpeg')
+    def test_custom_assets_mix_duration_and_fingerprint(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            base = root / 'assets/podcast/music'
+            base.mkdir(parents=True)
+            song = base / 'test song.wav'
+            podcast.music(song, .5)
+            cfg = {'title': 'test', 'gap_ms': 250, 'intro_music': 'test song.wav', 'outro_music': 'test song.wav', 'background_music': 'test song.wav', 'intro_seconds': .7, 'outro_seconds': .8, 'background_volume_db': -18}
+            assets, before = podcast.resolve_music(cfg, root)
+            work = root / 'work'
+            work.mkdir()
+            podcast.render([song, song], cfg, root / 'test.mp3', work, assets)
+            self.assertAlmostEqual(podcast.duration(root / 'test.mp3'), 2.75, delta=.15)
+            # Mixing must retain speech and create an additional signal without extending it.
+            import subprocess
+            speech = subprocess.check_output(['ffmpeg','-v','error','-i',str(work/'speech.wav'),'-f','s16le','-'])
+            mixed = subprocess.check_output(['ffmpeg','-v','error','-i',str(work/'mixed.wav'),'-f','s16le','-'])
+            self.assertEqual(len(speech), len(mixed))
+            self.assertNotEqual(speech, mixed)
+            podcast.music(song, .6)
+            _, after = podcast.resolve_music(cfg, root)
+            self.assertNotEqual(before['intro_music']['sha256'], after['intro_music']['sha256'])
+            for bad in ('../outside.wav', '/tmp/outside.wav', 'missing.mp3', 'https://example.com/a.mp3'):
+                with self.subTest(bad=bad), self.assertRaises(ValueError):
+                    podcast.resolve_music({**cfg, 'intro_music': bad}, root)

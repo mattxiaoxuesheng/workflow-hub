@@ -12,3 +12,5 @@
 - 生成前奏片尾是程序职责，不需编写音乐描述。
 - 如具备 GitHub 写入能力，读取目标是否存在后，将 MD 提交至 inputs/podcast/<episode_id>/script.md；否则提供完整 MD 并说明未上传。
 - 先上传，默认不运行音频制作。只有我要求生成时才读取 CLI.md 并触发 Actions，跟踪对应 run ID。
+
+用户要求配乐时，先读取 assets/podcast/music/README.md 并查看实际文件列表，只选择已存在且可使用的素材。分别设置 intro_music、outro_music、background_music；不编造文件名。用户未指定时 background_music: none。

@@ -57,7 +57,7 @@ def parse_script(path, override=''):
     cfg = yaml.load(match[1], Loader=UniqueLoader)
     if not isinstance(cfg, dict):
         raise ValueError('配置区必须是键值表')
-    allowed = {'schema_version', 'episode_id', 'title', 'mode', 'voice_preset', 'speakers', 'intro_music', 'outro_music', 'gap_ms'}
+    allowed = {'schema_version', 'episode_id', 'title', 'mode', 'voice_preset', 'speakers', 'intro_music', 'outro_music', 'gap_ms', 'background_music', 'background_volume_db', 'intro_seconds', 'outro_seconds'}
     if set(cfg) - allowed:
         raise ValueError(f'未知配置字段: {sorted(set(cfg) - allowed)}')
     if type(cfg.get('schema_version')) is not int or cfg['schema_version'] != 1:
@@ -93,9 +93,15 @@ def parse_script(path, override=''):
     gap = cfg.get('gap_ms', 350)
     if type(gap) is not int or not 0 <= gap <= 5000:
         raise ValueError('gap_ms 必须是 0–5000 的整数')
-    for key in ('intro_music', 'outro_music'):
-        if cfg.get(key, 'default') not in ('default', 'none'):
-            raise ValueError(f'{key} 当前支持 default 或 none')
+    for key in ('intro_music', 'outro_music', 'background_music'):
+        default = 'none' if key == 'background_music' else 'default'
+        value = cfg.get(key, default)
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError(f'{key} 必须为 default、none 或素材相对路径')
+    for key, default, low, high in [('intro_seconds', 5, .1, 60), ('outro_seconds', 6, .1, 60), ('background_volume_db', -18, -40, -6)]:
+        value = cfg.get(key, default)
+        if type(value) not in (int, float) or not low <= value <= high:
+            raise ValueError(f'{key} 必须为 {low} 到 {high} 的数值')
     body = match[2]
     blocks = list(re.finditer(r'^## ([0-9]{3}) ([AB])\s*$', body, re.M))
     if not blocks or body[:blocks[0].start()].strip():
@@ -170,16 +176,52 @@ def music(path, seconds=5, ending=False):
             buf.extend(struct.pack('<h', int(value * max(0, env) * 4500)))
         out.writeframes(buf)
 
-def render(audio_files, cfg, output, work):
+def resolve_music(cfg, root):
+    """Resolve and verify all assets before paid/online work; hash selected bytes."""
+    assets, identities = {}, {}
+    base = root / 'assets/podcast/music'
+    for key in ('intro_music', 'outro_music', 'background_music'):
+        value = cfg.get(key, 'none' if key == 'background_music' else 'default')
+        if value in ('default', 'none'):
+            assets[key] = value
+            identities[key] = {'selection': value}
+            continue
+        path = safe_path(base, value)
+        if Path(value).is_absolute() or path.suffix.lower() not in ('.mp3', '.wav', '.m4a', '.flac', '.ogg'):
+            raise ValueError(f'{key}: 仅允许素材目录内 mp3/wav/m4a/flac/ogg 文件')
+        if not path.is_file() or path.stat().st_size > 50 * 1024 * 1024:
+            raise ValueError(f'{key}: 素材不存在或超过 50 MB: {value}')
+        if not valid_audio(path):
+            raise ValueError(f'{key}: 素材不是有效音频: {value}')
+        assets[key] = path
+        identities[key] = {'selection': value, 'sha256': digest(path.read_bytes())}
+    return assets, identities
+
+
+def render(audio_files, cfg, output, work, assets=None):
+    assets = assets or {key: cfg.get(key, 'none' if key == 'background_music' else 'default') for key in ('intro_music', 'outro_music', 'background_music')}
     clips = []
     def pcm(source, name):
         target = work / name
         run('ffmpeg', '-y', '-i', source, '-af', 'loudnorm=I=-19:TP=-2:LRA=7', '-ar', '24000', '-ac', '1', '-c:a', 'pcm_s16le', target)
         return target
-    if cfg.get('intro_music', 'default') == 'default':
-        intro = work / 'intro.wav'
-        music(intro)
-        clips.append(intro)
+    def cue(key, seconds, name, gain=0):
+        selected = assets[key]
+        target = work / name
+        source = selected
+        if selected == 'default':
+            source = work / (key + '-source.wav')
+            music(source, max(2, seconds), key == 'outro_music')
+        fade = min(1.5, seconds / 3)
+        filters = f'loudnorm=I=-19:TP=-2:LRA=7,volume={gain}dB,afade=t=in:d={fade},afade=t=out:st={seconds-fade}:d={fade}'
+        run('ffmpeg', '-y', '-stream_loop', '-1', '-i', source, '-t', seconds, '-af', filters, '-ar', '24000', '-ac', '1', '-c:a', 'pcm_s16le', target)
+        return target
+    def concat(paths, name):
+        listing = work / (name + '.txt')
+        listing.write_text(''.join(f"file '{p.name}'\n" for p in paths), encoding='utf-8')
+        target = work / name
+        run('ffmpeg', '-y', '-f', 'concat', '-safe', '1', '-i', listing, '-c:a', 'pcm_s16le', target)
+        return target
     for i, source in enumerate(audio_files):
         clips.append(pcm(source, f'speech-{i:03d}.wav'))
         if i < len(audio_files) - 1 and cfg['gap_ms']:
@@ -187,14 +229,20 @@ def render(audio_files, cfg, output, work):
             if not silence.exists():
                 run('ffmpeg', '-y', '-f', 'lavfi', '-i', 'anullsrc=r=24000:cl=mono', '-t', str(cfg['gap_ms'] / 1000), silence)
             clips.append(silence)
-    if cfg.get('outro_music', 'default') == 'default':
-        outro = work / 'outro.wav'
-        music(outro, 6, True)
-        clips.append(outro)
-    # Paths here are generated internal names, never user-controlled concat syntax.
-    listing = work / 'concat.txt'
-    listing.write_text(''.join(f"file '{p.name}'\n" for p in clips), encoding='utf-8')
-    run('ffmpeg', '-y', '-f', 'concat', '-safe', '1', '-i', listing, '-c:a', 'libmp3lame', '-b:a', '128k', '-metadata', f'title={cfg["title"]}', output)
+    speech = concat(clips, 'speech.wav')
+    if assets['background_music'] != 'none':
+        bed = cue('background_music', duration(speech), 'background.wav', cfg.get('background_volume_db', -18))
+        mixed = work / 'mixed.wav'
+        run('ffmpeg', '-y', '-i', speech, '-i', bed, '-filter_complex', '[0:a][1:a]amix=inputs=2:duration=first:normalize=0,alimiter=limit=0.891:level=false:latency=true', '-ar', '24000', '-ac', '1', '-c:a', 'pcm_s16le', mixed)
+        speech = mixed
+    sequence = []
+    if assets['intro_music'] != 'none':
+        sequence.append(cue('intro_music', cfg.get('intro_seconds', 5), 'intro.wav'))
+    sequence.append(speech)
+    if assets['outro_music'] != 'none':
+        sequence.append(cue('outro_music', cfg.get('outro_seconds', 6), 'outro.wav'))
+    combined = concat(sequence, 'combined.wav')
+    run('ffmpeg', '-y', '-i', combined, '-c:a', 'libmp3lame', '-b:a', '128k', '-metadata', f'title={cfg["title"]}', output)
 
 async def build(args):
     root = Path(args.root).resolve()
@@ -202,10 +250,15 @@ async def build(args):
     if path.suffix != '.md':
         raise ValueError('script 必须是 inputs/podcast/ 内的 .md 文件')
     cfg, segments = parse_script(path, args.voice_preset)
+    for key in ('intro_music', 'outro_music', 'background_music'):
+        override = getattr(args, key, '')
+        if override:
+            cfg[key] = override
+    assets, music_info = resolve_music(cfg, root)
     output = Path(args.output).resolve()
     output.mkdir(parents=True, exist_ok=True)
-    fingerprint = digest(json.dumps({'cfg': cfg, 'segments': segments, 'source': digest(path.read_bytes()), 'code': digest(Path(__file__).read_bytes()), 'requirements': (HERE / 'requirements.txt').read_text()}, sort_keys=True, ensure_ascii=False).encode())
-    report = {'valid': True, 'episode_id': cfg['episode_id'], 'segments': len(segments), 'fingerprint': fingerprint, 'voice_availability_checked': False}
+    fingerprint = digest(json.dumps({'cfg': cfg, 'music': music_info, 'segments': segments, 'source': digest(path.read_bytes()), 'code': digest(Path(__file__).read_bytes()), 'requirements': (HERE / 'requirements.txt').read_text()}, sort_keys=True, ensure_ascii=False).encode())
+    report = {'valid': True, 'episode_id': cfg['episode_id'], 'segments': len(segments), 'fingerprint': fingerprint, 'voice_availability_checked': False, 'music': music_info}
     if args.validate_only:
         write_json(output / 'validation.json', report)
         print(json.dumps(report, ensure_ascii=False))
@@ -237,8 +290,8 @@ async def build(args):
     with tempfile.TemporaryDirectory(prefix='podcast-') as folder:
         work = Path(folder)
         final = work / 'episode.mp3'
-        render(audio_files, cfg, final, work)
-        meta = {'episode_id': cfg['episode_id'], 'title': cfg['title'], 'duration_seconds': duration(final), 'fingerprint': fingerprint, 'source_commit': os.environ.get('GITHUB_SHA', ''), 'run_id': os.environ.get('GITHUB_RUN_ID', ''), 'generated_at_utc': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()), 'voices': cfg['speakers'], 'audio_sha256': digest(final.read_bytes())}
+        render(audio_files, cfg, final, work, assets)
+        meta = {'episode_id': cfg['episode_id'], 'title': cfg['title'], 'duration_seconds': duration(final), 'fingerprint': fingerprint, 'source_commit': os.environ.get('GITHUB_SHA', ''), 'run_id': os.environ.get('GITHUB_RUN_ID', ''), 'generated_at_utc': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()), 'voices': cfg['speakers'], 'music': music_info, 'audio_sha256': digest(final.read_bytes())}
         shutil.copyfile(final, output / 'episode.mp3')
     shutil.copyfile(path, output / 'script.md')
     write_json(output / 'script.json', {'config': cfg, 'segments': segments})
@@ -272,6 +325,8 @@ def main():
     p.add_argument('--output', default='output')
     p.add_argument('--cache', default='.podcast-cache')
     p.add_argument('--voice-preset', default='')
+    for key in ('intro-music', 'outro-music', 'background-music'):
+        p.add_argument('--' + key, default='', help='覆盖文稿：default、none 或 assets/podcast/music 内相对路径')
     p.add_argument('--validate-only', action='store_true', help='只做离线结构检查，不访问语音服务')
     p.add_argument('--force', action='store_true', help='忽略分段音频缓存')
     p = commands.add_parser('voices', help='更新当前音色目录，可选生成试听包')

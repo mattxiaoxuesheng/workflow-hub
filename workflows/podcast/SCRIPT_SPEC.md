@@ -14,8 +14,8 @@
 | mode | 是 | solo 或 duo |
 | voice_preset | 是 | presets.yaml 中预设名称，或 custom |
 | speakers | custom 时 | solo 仅 A；duo 必须且只能 A、B；普通预设不要填写 |
-| intro_music | 否 | default（默认）或 none，务必写字符串 none 而非 YAML null |
-| outro_music | 否 | default（默认）或 none |
+| intro_music | 否 | default（默认）、none 或音乐素材相对路径 |
+| outro_music | 否 | default（默认）、none 或音乐素材相对路径 |
 | gap_ms | 否 | 段间停顿，整数 0–5000，默认 350 |
 
 `custom` 的每个角色必须有 `provider` 和 `voice`；可选 `rate`（如 `'+0%'`、`'-5%'`，范围 -50% 到 +50%）。provider 支持 edge；clone 只允许结构校验，实际生成会报“尚未接入”，不会替换声音。参见 [自定义样板](templates/custom.md)。
@@ -39,3 +39,22 @@
 配置优先级：CLI 非空 voice_preset > 文稿 voice_preset > 预设内的角色配置。覆盖预设的角色数量必须匹配 mode；带 speakers 的 custom 文稿不能直接覆盖成普通预设，请先移除 speakers。
 
 离线 validate-only 只做结构校验，不检查远程音色是否在线。实际生成会联网校验音色，无效时直接报错。
+
+## 选择片头、片尾及正文背景音乐
+
+音乐文件统一放在 `assets/podcast/music/`，字段只填相对于该目录的路径，不接受 URL 或绝对路径。支持 mp3/wav/m4a/flac/ogg，单文件最多 50 MB。三项独立选择：
+
+```yaml
+intro_music: intro/tech.mp3
+outro_music: outro/warm.mp3
+background_music: background/calm.mp3
+intro_seconds: 5
+outro_seconds: 6
+background_volume_db: -18
+```
+
+上面是上传自有素材后的示意文件名，不是内置文件。`default` 是合成三音和弦；`none` 关闭该项。background_music 默认 none，旧文稿继续支持。intro_seconds / outro_seconds 为 0.1–60 秒；background_volume_db 为 -40 到 -6 dB，默认 -18。
+
+文件会循环/裁剪到需要长度，并淡入淡出。背景音乐只覆盖正文（包括段间停顿），不会延长正文；片头片尾额外增加节目总时长。三项音乐选择都可由 CLI/Actions 覆盖，空值沿用 MD，none 表示明确关闭。时长和音量在 MD 中设置。
+
+选择自有素材时，离线校验也需要 ffprobe 检查文件；不存在或无效时在 TTS 前失败。见 [素材目录说明](../../assets/podcast/music/README.md)。

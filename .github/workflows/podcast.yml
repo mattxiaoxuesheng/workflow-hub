@@ -24,6 +24,18 @@ on:
         description: '可选任务标识，用于 Agent 精确查找本次运行'
         default: ''
         type: string
+      intro_music:
+        description: '片头：留空沿用 MD，或填素材路径/default/none'
+        default: ''
+        type: string
+      outro_music:
+        description: '片尾：留空沿用 MD，或填素材路径/default/none'
+        default: ''
+        type: string
+      background_music:
+        description: '正文背景音乐：留空沿用 MD，或填素材路径/default/none'
+        default: ''
+        type: string
   workflow_call:
     inputs:
       script:
@@ -39,6 +51,15 @@ on:
         default: false
         type: boolean
       request_id:
+        default: ''
+        type: string
+      intro_music:
+        default: ''
+        type: string
+      outro_music:
+        default: ''
+        type: string
+      background_music:
         default: ''
         type: string
 permissions:
@@ -69,10 +90,13 @@ jobs:
           VOICE_PRESET: ${{ inputs.voice_preset }}
           VALIDATE_ONLY: ${{ inputs.validate_only }}
           FORCE: ${{ inputs.force }}
+          INTRO_MUSIC: ${{ inputs.intro_music }}
+          OUTRO_MUSIC: ${{ inputs.outro_music }}
+          BACKGROUND_MUSIC: ${{ inputs.background_music }}
         shell: bash
         run: |
           mkdir -p output .podcast-cache
-          args=(build --script "$SCRIPT" --voice-preset "$VOICE_PRESET")
+          args=(build --script "$SCRIPT" --voice-preset "$VOICE_PRESET" --intro-music "$INTRO_MUSIC" --outro-music "$OUTRO_MUSIC" --background-music "$BACKGROUND_MUSIC")
           if [[ "$VALIDATE_ONLY" == true ]]; then args+=(--validate-only); fi
           if [[ "$FORCE" == true ]]; then args+=(--force); fi
           docker run --rm --user "$(id -u):$(id -g)" -e GITHUB_SHA -e GITHUB_RUN_ID -v "$PWD:/workspace" workflow-hub-podcast "${args[@]}"

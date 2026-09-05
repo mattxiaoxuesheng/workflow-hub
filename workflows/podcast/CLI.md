@@ -111,3 +111,27 @@ JSON 请求体：
 ```
 
 读取运行列表并按 request_id 和 head_sha 确认任务。插件缺少 POST/Actions 权限时不能靠只读 fetch 工具触发，应改由有权限的 CLI 或 GitHub 网页操作。
+
+## 覆盖本期音乐选择
+
+先把自有素材上传至 assets/podcast/music/。以下示例文件名需自行上传；程序不会联网下载音乐。
+
+```bash
+gh workflow run podcast.yml -R mattxiaoxuesheng/workflow-hub -f script="inputs/podcast/demo/script.md" -f intro_music="intro/tech.mp3" -f outro_music="outro/warm.mp3" -f background_music="background/calm.mp3"
+```
+
+三个新参数均可选：留空沿用文稿；default 合成和弦；none 关闭；其他值是素材相对路径。网页 Run workflow 也有这三个输入框。
+
+不需上传文件即可试用合成背景音乐：
+
+```bash
+gh workflow run podcast.yml -R mattxiaoxuesheng/workflow-hub -f script="inputs/podcast/demo/script.md" -f background_music=default
+```
+
+本地参数用连字符：
+
+```bash
+python workflows/podcast/podcast.py build --script inputs/podcast/demo/script.md --intro-music intro/tech.mp3 --outro-music none --background-music background/calm.mp3
+```
+
+intro_seconds、outro_seconds、background_volume_db 在 MD 中设定，不额外增加 Actions 输入。工作流同时支持 workflow_call，可由其他已授权的工作流传入相同参数调用。
