@@ -14,3 +14,7 @@
 - 先上传，默认不运行音频制作。只有我要求生成时才读取 CLI.md 并触发 Actions，跟踪对应 run ID。
 
 用户要求配乐时，先读取 assets/podcast/music/README.md 并查看实际文件列表，只选择已存在且可使用的素材。分别设置 intro_music、outro_music、background_music；不编造文件名。用户未指定时 background_music: none。
+
+## Hugging Face 声音克隆
+
+hf-space 已支持 Qwen 官方 Space，单人、双人或与 Edge 混合使用。需要 HF_TOKEN 和短参考录音；上传文稿不自动生成。配置、Secret 和命令见 [HF_SPACE.md](HF_SPACE.md)。旧 clone provider 仍为占位。

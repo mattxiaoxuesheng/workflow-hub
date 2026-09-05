@@ -17,9 +17,10 @@ import time
 import wave
 
 import yaml
+import hf_space
 
 HERE = Path(__file__).resolve().parent
-VERSION = '1.0.0'
+VERSION = '1.1.0'
 
 class UniqueLoader(yaml.SafeLoader):
     pass
@@ -82,10 +83,12 @@ def parse_script(path, override=''):
     if not isinstance(speakers, dict) or set(speakers) != expected:
         raise ValueError(f'{cfg["mode"]} 必须且只能定义角色 {sorted(expected)}')
     for role, voice in speakers.items():
-        if not isinstance(voice, dict) or set(voice) - {'provider', 'voice', 'rate'}:
+        if isinstance(voice, dict) and voice.get('provider') == 'hf-space':
+            hf_space.validate(voice)
+        elif not isinstance(voice, dict) or set(voice) - {'provider', 'voice', 'rate'}:
             raise ValueError(f'角色 {role} 声音配置错误')
-        if voice.get('provider') not in ('edge', 'clone'):
-            raise ValueError(f'角色 {role}: provider 只能为 edge 或 clone')
+        if voice.get('provider') not in ('edge', 'clone', 'hf-space'):
+            raise ValueError(f'角色 {role}: provider 只能为 edge、hf-space 或 clone（占位）')
         if not isinstance(voice.get('voice'), str) or not voice['voice'].strip():
             raise ValueError(f'角色 {role} 缺少 voice')
         if not re.fullmatch(r'[+-](?:[0-9]|[1-4][0-9]|50)%', voice.get('rate', '+0%')):
@@ -255,43 +258,57 @@ async def build(args):
         if override:
             cfg[key] = override
     assets, music_info = resolve_music(cfg, root)
+    hf_roles = {role: hf_space.prepare(v, root, duration, args.validate_only) for role, v in cfg['speakers'].items() if v['provider'] == 'hf-space'}
+    references = {role: ({k: v for k, v in ref.items() if k != 'path'} if ref else {'missing': True}) for role, ref in hf_roles.items()}
     output = Path(args.output).resolve()
     output.mkdir(parents=True, exist_ok=True)
-    fingerprint = digest(json.dumps({'cfg': cfg, 'music': music_info, 'segments': segments, 'source': digest(path.read_bytes()), 'code': digest(Path(__file__).read_bytes()), 'requirements': (HERE / 'requirements.txt').read_text()}, sort_keys=True, ensure_ascii=False).encode())
-    report = {'valid': True, 'episode_id': cfg['episode_id'], 'segments': len(segments), 'fingerprint': fingerprint, 'voice_availability_checked': False, 'music': music_info}
+    fingerprint = digest(json.dumps({'cfg': cfg, 'references': references, 'music': music_info, 'segments': segments, 'source': digest(path.read_bytes()), 'code': digest(Path(__file__).read_bytes()), 'requirements': (HERE / 'requirements.txt').read_text()}, sort_keys=True, ensure_ascii=False).encode())
+    report = {'valid': True, 'episode_id': cfg['episode_id'], 'segments': len(segments), 'fingerprint': fingerprint, 'voice_availability_checked': False, 'reference_audio': references, 'music': music_info}
     if args.validate_only:
         write_json(output / 'validation.json', report)
         print(json.dumps(report, ensure_ascii=False))
         return
+    for stale in ('episode.mp3', 'metadata.json', 'script.json', 'script.md', 'validation.json'):
+        (output / stale).unlink(missing_ok=True)
     if any(v['provider'] == 'clone' for v in cfg['speakers'].values()):
         raise ValueError('声音克隆服务尚未接入；请使用 Edge 预设。')
-    catalog = await voice_catalog()
+    if hf_roles and not os.environ.get('HF_TOKEN'):
+        raise ValueError('缺少 HF_TOKEN：请在 GitHub Actions Secrets 添加 HF_TOKEN；Edge 和离线校验不需要它')
+    hf_providers = {role: hf_space.HFSpaceProvider(cfg['speakers'][role], ref) for role, ref in hf_roles.items()}
+    edge_voices = [v for v in cfg['speakers'].values() if v['provider'] == 'edge']
+    catalog = await voice_catalog() if edge_voices else []
     available = {v['ShortName'] for v in catalog}
-    for voice in cfg['speakers'].values():
+    for voice in edge_voices:
         if voice['voice'] not in available:
             raise ValueError(f'音色不可用: {voice["voice"]}，请运行 voices 更新列表')
     cache = Path(args.cache).resolve()
     cache.mkdir(parents=True, exist_ok=True)
     audio_files = []
     for i, segment in enumerate(segments):
-        voice = cfg['speakers'][segment['role']]
-        key = digest(json.dumps([VERSION, voice, segment['text']], sort_keys=True).encode())
-        target = cache / f'{key}.mp3'
-        if args.force or not valid_audio(target):
-            temp = cache / f'{key}.{os.getpid()}.tmp.mp3'
-            try:
-                await PROVIDERS[voice['provider']].synthesize(segment['text'], voice['voice'], voice.get('rate', '+0%'), temp)
-                temp.replace(target)
-            finally:
-                temp.unlink(missing_ok=True)
-        audio_files.append(target)
+        role = segment['role']
+        voice = cfg['speakers'][role]
+        chunks = hf_space.split_text(segment['text']) if role in hf_roles else [segment['text']]
+        for chunk in chunks:
+            key = digest(json.dumps([VERSION, voice, references.get(role), chunk], sort_keys=True).encode())
+            target = cache / f'{key}.mp3'
+            if args.force or not valid_audio(target):
+                temp = cache / f'{key}.{os.getpid()}.tmp.mp3'
+                try:
+                    if role in hf_roles:
+                        await hf_providers[role].synthesize(chunk, temp, run, valid_audio)
+                    else:
+                        await PROVIDERS[voice['provider']].synthesize(chunk, voice['voice'], voice.get('rate', '+0%'), temp)
+                    temp.replace(target)
+                finally:
+                    temp.unlink(missing_ok=True)
+            audio_files.append(target)
         print(f'已完成台词 {i+1}/{len(segments)}', flush=True)
     # Stage full deliverables so a failed render cannot be mistaken for a finished episode.
     with tempfile.TemporaryDirectory(prefix='podcast-') as folder:
         work = Path(folder)
         final = work / 'episode.mp3'
         render(audio_files, cfg, final, work, assets)
-        meta = {'episode_id': cfg['episode_id'], 'title': cfg['title'], 'duration_seconds': duration(final), 'fingerprint': fingerprint, 'source_commit': os.environ.get('GITHUB_SHA', ''), 'run_id': os.environ.get('GITHUB_RUN_ID', ''), 'generated_at_utc': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()), 'voices': cfg['speakers'], 'music': music_info, 'audio_sha256': digest(final.read_bytes())}
+        meta = {'episode_id': cfg['episode_id'], 'title': cfg['title'], 'duration_seconds': duration(final), 'fingerprint': fingerprint, 'source_commit': os.environ.get('GITHUB_SHA', ''), 'run_id': os.environ.get('GITHUB_RUN_ID', ''), 'generated_at_utc': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()), 'voices': cfg['speakers'], 'reference_audio': references, 'music': music_info, 'audio_sha256': digest(final.read_bytes())}
         shutil.copyfile(final, output / 'episode.mp3')
     shutil.copyfile(path, output / 'script.md')
     write_json(output / 'script.json', {'config': cfg, 'segments': segments})

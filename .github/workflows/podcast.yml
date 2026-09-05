@@ -37,6 +37,9 @@ on:
         default: ''
         type: string
   workflow_call:
+    secrets:
+      HF_TOKEN:
+        required: false
     inputs:
       script:
         required: true
@@ -86,6 +89,7 @@ jobs:
         run: docker build -f workflows/podcast/Dockerfile -t workflow-hub-podcast .
       - name: Validate or generate
         env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
           SCRIPT: ${{ inputs.script }}
           VOICE_PRESET: ${{ inputs.voice_preset }}
           VALIDATE_ONLY: ${{ inputs.validate_only }}
@@ -99,7 +103,7 @@ jobs:
           args=(build --script "$SCRIPT" --voice-preset "$VOICE_PRESET" --intro-music "$INTRO_MUSIC" --outro-music "$OUTRO_MUSIC" --background-music "$BACKGROUND_MUSIC")
           if [[ "$VALIDATE_ONLY" == true ]]; then args+=(--validate-only); fi
           if [[ "$FORCE" == true ]]; then args+=(--force); fi
-          docker run --rm --user "$(id -u):$(id -g)" -e GITHUB_SHA -e GITHUB_RUN_ID -v "$PWD:/workspace" workflow-hub-podcast "${args[@]}"
+          docker run --rm --user "$(id -u):$(id -g)" -e HF_TOKEN -e GITHUB_SHA -e GITHUB_RUN_ID -v "$PWD:/workspace" workflow-hub-podcast "${args[@]}"
       - name: Save speech cache (also preserves completed segments after a failed run)
         if: ${{ always() && !inputs.validate_only }}
         uses: actions/cache/save@v4

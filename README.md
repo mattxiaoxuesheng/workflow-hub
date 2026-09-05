@@ -20,3 +20,9 @@
 **上传文稿不会自动配音。** 音频制作与音色试听都需手动触发。修改程序会运行离线测试，不会调用 TTS。
 
 本仓库为公开仓库：提交的文稿可公开读取。Edge 配音会把台词发送给在线语音服务；需要保密的材料请使用合适的私有存储与语音方案。
+
+## Hugging Face 声音克隆
+
+hf-space 已支持 Qwen 官方 Space，单人、双人或与 Edge 混合使用。需要 HF_TOKEN 和短参考录音；上传文稿不自动生成。配置、Secret 和命令见 [workflows/podcast/HF_SPACE.md](workflows/podcast/HF_SPACE.md)。旧 clone provider 仍为占位。
+
+[仓库架构图](ARCHITECTURE.md)

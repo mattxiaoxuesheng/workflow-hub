@@ -1,6 +1,6 @@
 # 文稿转播客
 
-标准 MD → 校验 → Edge TTS 分角色合成 → 统一台词响度 → 添加段间停顿与前奏片尾 → MP3。没有大模型调用，不接收已经录好的节目。
+标准 MD → 校验 → Edge TTS / HF Space 分角色合成 → 统一台词响度 → 添加段间停顿与前奏片尾 → MP3。不调用写稿大模型，不接收已经录好的节目。
 
 ## 快速开始
 
@@ -56,3 +56,7 @@ python workflows/podcast/podcast.py build --script inputs/podcast/demo/script.md
 ```
 
 音频渲染测试需要 ffmpeg 与 ffprobe。程序检查工作流仅对源码/配置变化执行离线测试，不对 inputs 上传配音。真实 Edge 连通性需显式运行制作或试听验证。
+
+## Hugging Face 声音克隆
+
+hf-space 已支持 Qwen 官方 Space，单人、双人或与 Edge 混合使用。需要 HF_TOKEN 和短参考录音；上传文稿不自动生成。配置、Secret 和命令见 [HF_SPACE.md](HF_SPACE.md)。旧 clone provider 仍为占位。

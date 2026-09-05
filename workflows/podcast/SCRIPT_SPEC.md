@@ -1,6 +1,6 @@
 # 播客 MD 规范 v1
 
-唯一输入格式为 UTF-8 Markdown，建议无 BOM；LF/CRLF 均可。每期存为 `inputs/podcast/<episode_id>/script.md`。上传录音、Word 或 PDF 不属于本工作流输入；请先在外部 AI 中完成编稿。
+唯一输入格式为 UTF-8 Markdown，建议无 BOM；LF/CRLF 均可。每期存为 `inputs/podcast/<episode_id>/script.md`。完整录好的播客、Word 或 PDF 不属于本工作流文稿输入；hf-space 可另外提供短参考录音；请先在外部 AI 中完成编稿。
 
 ## YAML 配置
 
@@ -18,7 +18,7 @@
 | outro_music | 否 | default（默认）、none 或音乐素材相对路径 |
 | gap_ms | 否 | 段间停顿，整数 0–5000，默认 350 |
 
-`custom` 的每个角色必须有 `provider` 和 `voice`；可选 `rate`（如 `'+0%'`、`'-5%'`，范围 -50% 到 +50%）。provider 支持 edge；clone 只允许结构校验，实际生成会报“尚未接入”，不会替换声音。参见 [自定义样板](templates/custom.md)。
+`custom` 的每个角色必须有 `provider` 和 `voice`；可选 `rate`（如 `'+0%'`、`'-5%'`，范围 -50% 到 +50%）。provider 支持 edge、hf-space（详见 [克隆接入说明](HF_SPACE.md)）；clone 只允许结构校验，实际生成会报“尚未接入”，不会替换声音。参见 [自定义样板](templates/custom.md)。
 
 ## 台词段落
 

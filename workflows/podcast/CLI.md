@@ -135,3 +135,7 @@ python workflows/podcast/podcast.py build --script inputs/podcast/demo/script.md
 ```
 
 intro_seconds、outro_seconds、background_volume_db 在 MD 中设定，不额外增加 Actions 输入。工作流同时支持 workflow_call，可由其他已授权的工作流传入相同参数调用。
+
+## Hugging Face 克隆
+
+见 [HF_SPACE.md](HF_SPACE.md)：沿用相同 build / gh workflow run 命令，由 MD 的 provider: hf-space 选择克隆。HF_TOKEN 在 Secret 中设置，不作为 CLI 参数；workflow_call 需显式传递此 Secret。
