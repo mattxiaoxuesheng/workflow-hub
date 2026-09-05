@@ -1,13 +1,27 @@
-name: 本次一分钟播客制作
+name: 归档本次播客音频
 on:
   push:
     branches: [main]
     paths: ['.github/workflows/podcast-oneoff.yml']
 permissions:
-  contents: read
+  contents: write
+  actions: read
 jobs:
-  generate:
-    uses: ./.github/workflows/podcast.yml
-    with:
-      script: inputs/podcast/llm-update-20260905/script.md
-      request_id: llm-update-20260905-first
+  archive:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: podcast-33938083147-1
+          run-id: 33938083147
+          github-token: ${{ github.token }}
+          path: inputs/podcast/llm-update-20260905/generated
+      - name: Archive this episode only
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add inputs/podcast/llm-update-20260905/generated
+          git commit -m "Archive generated one-minute model update podcast"
+          git push origin HEAD:main
