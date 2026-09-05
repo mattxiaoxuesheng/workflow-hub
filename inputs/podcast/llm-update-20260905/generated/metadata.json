@@ -1,0 +1,22 @@
+{
+  "episode_id": "llm-update-20260905",
+  "title": "一分钟大模型进展：从回答问题到完成工作",
+  "duration_seconds": 62.976,
+  "fingerprint": "8f8f58be60249edfb8976a689d12643dda1988ad77e1d08bf9eeee4e6b29094a",
+  "source_commit": "72bd8df3f14dc121f7604974b4b9f677f05a894b",
+  "run_id": "33938083147",
+  "generated_at_utc": "2026-09-05T02:06:21Z",
+  "voices": {
+    "A": {
+      "provider": "edge",
+      "voice": "zh-CN-XiaoxiaoNeural",
+      "rate": "+0%"
+    },
+    "B": {
+      "provider": "edge",
+      "voice": "zh-CN-YunxiNeural",
+      "rate": "+0%"
+    }
+  },
+  "audio_sha256": "ef4bff2d6ee9f169f2aabe44a8c38bec63fecf98cf2fff6335ad876ce4a90ec4"
+}
