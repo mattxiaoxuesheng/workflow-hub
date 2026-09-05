@@ -24,6 +24,23 @@ on:
         description: '可选任务标识，用于 Agent 精确查找本次运行'
         default: ''
         type: string
+  workflow_call:
+    inputs:
+      script:
+        required: true
+        type: string
+      voice_preset:
+        default: ''
+        type: string
+      validate_only:
+        default: false
+        type: boolean
+      force:
+        default: false
+        type: boolean
+      request_id:
+        default: ''
+        type: string
 permissions:
   contents: read
 concurrency:

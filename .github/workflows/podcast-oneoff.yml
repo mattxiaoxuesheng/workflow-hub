@@ -1,0 +1,13 @@
+name: 本次一分钟播客制作
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/podcast-oneoff.yml']
+permissions:
+  contents: read
+jobs:
+  generate:
+    uses: ./.github/workflows/podcast.yml
+    with:
+      script: inputs/podcast/llm-update-20260905/script.md
+      request_id: llm-update-20260905-first
