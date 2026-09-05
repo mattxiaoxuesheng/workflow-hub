@@ -1,0 +1,13 @@
+zh-solo-female:
+  description: 中文单人女声，晓晓
+  speakers:
+    A: {provider: edge, voice: zh-CN-XiaoxiaoNeural, rate: '+0%'}
+zh-solo-male:
+  description: 中文单人男声，云希
+  speakers:
+    A: {provider: edge, voice: zh-CN-YunxiNeural, rate: '+0%'}
+zh-duo-female-male:
+  description: 中文双人，A 晓晓，B 云希
+  speakers:
+    A: {provider: edge, voice: zh-CN-XiaoxiaoNeural, rate: '+0%'}
+    B: {provider: edge, voice: zh-CN-YunxiNeural, rate: '+0%'}

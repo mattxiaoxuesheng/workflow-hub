@@ -1,0 +1,9 @@
+{
+  "catalog_type": "curated_seed",
+  "live_verified_at": null,
+  "note": "常用音色种子列表，并非实时完整目录。运行 podcast-voices.yml 获取当前列表与试听。",
+  "voices": [
+    {"ShortName": "zh-CN-XiaoxiaoNeural", "label": "晓晓", "Locale": "zh-CN", "Gender": "Female"},
+    {"ShortName": "zh-CN-YunxiNeural", "label": "云希", "Locale": "zh-CN", "Gender": "Male"}
+  ]
+}

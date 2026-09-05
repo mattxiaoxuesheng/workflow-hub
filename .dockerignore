@@ -1,0 +1,5 @@
+.git
+output
+.podcast-cache
+.venv
+**/__pycache__

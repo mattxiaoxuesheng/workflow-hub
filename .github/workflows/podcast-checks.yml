@@ -1,0 +1,19 @@
+name: 播客程序检查（不配音）
+on:
+  push:
+    paths: ['workflows/podcast/**', '.github/workflows/podcast*.yml']
+  pull_request:
+    paths: ['workflows/podcast/**', '.github/workflows/podcast*.yml']
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - run: docker build -f workflows/podcast/Dockerfile -t workflow-hub-podcast .
+      - name: Offline tests including audio rendering
+        run: docker run --rm --entrypoint python workflow-hub-podcast -m unittest discover -s /app/tests -v

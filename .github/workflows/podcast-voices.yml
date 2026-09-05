@@ -1,0 +1,37 @@
+name: 播客音色目录与试听
+run-name: 'Voice preview | ${{ inputs.locale }} | ${{ github.run_number }}'
+on:
+  workflow_dispatch:
+    inputs:
+      locale:
+        description: '语言地区前缀：zh 中文、zh-CN 大陆中文、en 英文'
+        type: string
+        default: zh
+      sample:
+        description: '试听音色，逗号分隔，最多 8 个；留空仅更新目录'
+        type: string
+        default: 'zh-CN-XiaoxiaoNeural,zh-CN-YunxiNeural'
+permissions:
+  contents: read
+jobs:
+  voices:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - run: docker build -f workflows/podcast/Dockerfile -t workflow-hub-podcast .
+      - name: Fetch voices and generate samples
+        env:
+          LOCALE: ${{ inputs.locale }}
+          SAMPLE: ${{ inputs.sample }}
+        run: |
+          mkdir -p output
+          docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/workspace" workflow-hub-podcast voices --locale "$LOCALE" --sample "$SAMPLE"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: 'podcast-voices-${{ github.run_id }}'
+          path: output/
+          if-no-files-found: error
+          retention-days: 30
