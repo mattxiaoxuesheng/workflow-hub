@@ -29,5 +29,25 @@ jobs:
         working-directory: publisher/frontend
       - run: npm run build
         working-directory: publisher/frontend
-      - run: docker compose -f deploy/docker-compose.yml config --no-env-resolution --quiet
+      - name: Prepare sample deployment configuration
+        run: |
+          sudo install -d -m 700 /opt/wechat-publisher/secrets
+          sudo install -m 600 deploy/.env.example /opt/wechat-publisher/secrets/publisher.env
+          sudo docker compose -f deploy/docker-compose.yml config --quiet
       - run: docker build -f publisher/Dockerfile -t wechat-publisher:ci .
+      - name: Container startup and frontend smoke check
+        run: |
+          docker run -d --name publisher-ci --read-only --tmpfs /tmp --tmpfs /app/data:uid=10001,gid=10001 -e PUBLISHER_ORIGIN=https://test.invalid wechat-publisher:ci
+          python - <<'PY'
+          import subprocess, time
+          for attempt in range(15):
+              result = subprocess.run(['docker','exec','publisher-ci','python','-c',"import urllib.request; assert urllib.request.urlopen('http://127.0.0.1:8000/healthz').status == 200; assert b'root' in urllib.request.urlopen('http://127.0.0.1:8000/').read()"],capture_output=True)
+              if result.returncode == 0:
+                  break
+              time.sleep(2)
+          else:
+              subprocess.run(['docker','logs','publisher-ci'])
+              raise SystemExit('Container did not become healthy')
+          PY
+      - if: always()
+        run: docker rm -f publisher-ci || true

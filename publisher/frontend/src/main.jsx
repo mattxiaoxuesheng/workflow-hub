@@ -20,7 +20,7 @@ function App(){
  async function load(id){const next=await api('/versions/'+id);seq.current++;setV(next);setForm({title:next.title,markdown:next.markdown,template:next.template,base_version_id:next.id});setHtml(next.preview_html);setCompare(false)}
  useEffect(()=>{fetch('/api/v1/me').then(async r=>{if(r.ok)setUser(await r.json())}).finally(()=>setChecked(true))},[]);
  useEffect(()=>{if(user)run(async()=>{await refresh();setThemes(await api('/templates'))})},[user?.username]);
- useEffect(()=>{if(!form)return;const n=++seq.current;const timer=setTimeout(()=>{api('/preview',{method:'POST',body:form}).then(r=>{if(n===seq.current)setHtml(r.html)}).catch(e=>{if(n===seq.current)setError(e.message)})},400);return()=>clearTimeout(timer)},[form]);
+ useEffect(()=>{if(!form)return;if(v&&form.markdown===v.markdown&&form.title===v.title&&form.template===v.template){seq.current++;setHtml(v.preview_html);return;}const n=++seq.current;const timer=setTimeout(()=>{api('/preview',{method:'POST',body:form}).then(r=>{if(n===seq.current)setHtml(r.html)}).catch(e=>{if(n===seq.current)setError(e.message)})},400);return()=>clearTimeout(timer)},[form]);
  const dirty=v&&form&&(v.markdown!==form.markdown||v.title!==form.title||v.template!==form.template);
  useEffect(()=>{const warn=e=>{if(dirty){e.preventDefault();e.returnValue=''}};window.addEventListener('beforeunload',warn);return()=>window.removeEventListener('beforeunload',warn)},[dirty]);
  async function choose(id){if(dirty&&!window.confirm('尚有未保存的修改，放弃修改并切换版本？'))return;await run(()=>load(id))}
