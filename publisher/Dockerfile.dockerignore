@@ -1,0 +1,11 @@
+.git
+.env
+**/*.env
+**/secrets
+**/node_modules
+**/dist
+**/__pycache__
+publisher/data
+output
+assets
+inputs

@@ -1,0 +1,7 @@
+.article {color:#202c37;font-size:16px;line-height:1.85;padding:22px;font-family:sans-serif;word-wrap:break-word;}
+h1 {font-size:28px;line-height:1.4;color:#083f4d;border-top:5px solid #00a1a7;padding-top:20px;}
+h2 {font-size:22px;color:#007a83;margin:32px 0 16px;} h3 {font-size:18px;} strong {color:#007a83;}
+p {margin:16px 0;} img {max-width:100%;height:auto;display:block;margin:20px auto;}
+blockquote {border-left:3px solid #00a1a7;background:#edfafb;padding:12px 18px;margin:20px 0;}
+pre {white-space:pre-wrap;background:#152e3a;color:#e3f4fa;padding:16px;font-size:14px;word-wrap:break-word;}
+table {border-collapse:collapse;width:100%;font-size:14px;} th,td {border:1px solid #b8d9df;padding:8px;} th {background:#e5f4f6;} a {color:#007a83;}

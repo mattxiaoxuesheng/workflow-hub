@@ -1,0 +1,7 @@
+.article { color:#25364b;font-size:16px;line-height:1.9;padding:24px;font-family:sans-serif;word-wrap:break-word; }
+h1 {font-size:26px;line-height:1.45;border-bottom:3px solid #1b4d79;padding-bottom:20px;}
+h2 {font-size:21px;border-left:5px solid #1b4d79;padding-left:12px;margin:32px 0 16px;} h3 {font-size:18px;color:#1b4d79;}
+p {margin:16px 0;} img {max-width:100%;height:auto;display:block;margin:20px auto;}
+blockquote {background:#eef3f8;padding:14px 18px;margin:20px 0;border-left:3px solid #7898b8;}
+pre {white-space:pre-wrap;background:#eef3f8;padding:16px;font-size:14px;word-wrap:break-word;}
+table {border-collapse:collapse;width:100%;font-size:14px;} th {background:#e7eef6;} th,td {border:1px solid #c4d2e2;padding:8px;} a {color:#1b4d79;} strong {color:#123d65;}

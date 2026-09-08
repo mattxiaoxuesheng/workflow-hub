@@ -5,3 +5,11 @@ __pycache__/
 *.pyc
 assets/podcast/voices/*
 !assets/podcast/voices/README.md
+.env
+*.env
+!.env.example
+secrets/
+publisher/data/
+publisher/frontend/node_modules/
+publisher/frontend/dist/
+.pytest_cache/
