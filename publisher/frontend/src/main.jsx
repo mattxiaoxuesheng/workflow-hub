@@ -5,6 +5,7 @@ import{markdown}from'@codemirror/lang-markdown';
 import './style.css';
 
 const labels={clean:'简洁阅读',business:'商务报告',tech:'科技杂志'};
+const apiBase=import.meta.env.BASE_URL+'api/v1';
 const statuses={drafting:'正在创建草稿',draft:'微信草稿',draft_unknown:'草稿结果待核对',submitting:'正在提交',publishing:'发布处理中',published:'已发布',publish_unknown:'发布结果待核对',publish_failed:'发布失败'};
 function App(){
  const[user,setUser]=useState(null),[checked,setChecked]=useState(false),[items,setItems]=useState([]),[v,setV]=useState(null),[form,setForm]=useState(null),[html,setHtml]=useState(''),[error,setError]=useState(''),[notice,setNotice]=useState(''),[busy,setBusy]=useState(false),[tab,setTab]=useState('articles'),[management,setManagement]=useState(null),[themeList,setThemes]=useState([]),[compare,setCompare]=useState(false),[confirmation,setConfirmation]=useState(false),[shownToken,setShownToken]=useState('');
@@ -12,13 +13,13 @@ function App(){
  async function api(path,options={}){
   const headers={'x-csrf-token':user?.csrf||'',...options.headers};
   if(options.body && !(options.body instanceof FormData)){headers['Content-Type']='application/json';options.body=JSON.stringify(options.body)}
-  const r=await fetch('/api/v1'+path,{...options,headers,credentials:'same-origin'});
+  const r=await fetch(apiBase+path,{...options,headers,credentials:'same-origin'});
   const data=await r.json();if(!r.ok){if(r.status===401)setUser(null);throw Error(typeof data.detail==='string'?data.detail:'请检查填写的内容')};return data;
  }
  async function run(fn){setError('');setNotice('');setBusy(true);try{await fn()}catch(e){setError(e.message)}finally{setBusy(false)}}
  async function refresh(){setItems(await api('/articles'))}
  async function load(id){const next=await api('/versions/'+id);seq.current++;setV(next);setForm({title:next.title,markdown:next.markdown,template:next.template,base_version_id:next.id});setHtml(next.preview_html);setCompare(false)}
- useEffect(()=>{fetch('/api/v1/me').then(async r=>{if(r.ok)setUser(await r.json())}).finally(()=>setChecked(true))},[]);
+ useEffect(()=>{fetch(apiBase+'/me').then(async r=>{if(r.ok)setUser(await r.json())}).finally(()=>setChecked(true))},[]);
  useEffect(()=>{if(user)run(async()=>{await refresh();setThemes(await api('/templates'))})},[user?.username]);
  useEffect(()=>{if(!form)return;if(v&&form.markdown===v.markdown&&form.title===v.title&&form.template===v.template){seq.current++;setHtml(v.preview_html);return;}const n=++seq.current;const timer=setTimeout(()=>{api('/preview',{method:'POST',body:form}).then(r=>{if(n===seq.current)setHtml(r.html)}).catch(e=>{if(n===seq.current)setError(e.message)})},400);return()=>clearTimeout(timer)},[form]);
  const dirty=v&&form&&(v.markdown!==form.markdown||v.title!==form.title||v.template!==form.template);

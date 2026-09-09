@@ -60,6 +60,7 @@ def create_app(data_dir=None, testing=False, wechat=None):
     dummy_hash = password_hasher.hash(secrets.token_urlsafe(24))
     secure = not testing and os.getenv('COOKIE_SECURE', 'true').lower() != 'false'
     origin = os.getenv('PUBLISHER_ORIGIN', '').rstrip('/')
+    cookie_path = os.getenv('PUBLISHER_BASE_PATH', '').rstrip('/') + '/'
 
     def log(c, actor, action, target=''):
         c.execute(insert(db.audit).values(actor=str(actor), action=action, target=str(target), created_at=time.time()))
@@ -121,7 +122,7 @@ def create_app(data_dir=None, testing=False, wechat=None):
             c.execute(insert(db.sessions).values(token_hash=digest(sid), user_id=u['id'], csrf=csrf, expires_at=now+ttl))
             log(c, u['username'], 'login')
         result = JSONResponse({'username': u['username'], 'role': u['role'], 'csrf': csrf})
-        result.set_cookie('publisher_session', sid, max_age=ttl, secure=secure, httponly=True, samesite='strict')
+        result.set_cookie('publisher_session', sid, max_age=ttl, secure=secure, httponly=True, samesite='strict', path=cookie_path)
         return result
 
     @app.get('/api/v1/me')
@@ -132,7 +133,7 @@ def create_app(data_dir=None, testing=False, wechat=None):
     def logout(request: Request, user=Depends(current)):
         with engine.begin() as c:
             c.execute(delete(db.sessions).where(db.sessions.c.token_hash == digest(request.cookies['publisher_session'])))
-        r = JSONResponse({'ok': True}); r.delete_cookie('publisher_session'); return r
+        r = JSONResponse({'ok': True}); r.delete_cookie('publisher_session', path=cookie_path); return r
 
     def asset_map(c, version_id):
         return {r['path']: dict(r) for r in c.execute(select(db.assets).where(db.assets.c.version_id == version_id)).mappings()}

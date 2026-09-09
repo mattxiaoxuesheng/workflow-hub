@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 from urllib.parse import quote
 from bs4 import BeautifulSoup
@@ -19,7 +20,7 @@ def render(markdown, template, assets, version_id=None, wechat_urls=None, templa
     for img in soup.find_all('img'):
         name = asset_path(img['src'])
         img['src'] = (wechat_urls[name] if wechat_urls is not None else
-                      f'/api/v1/versions/{version_id}/assets/{quote(name)}')
+                      f'{os.getenv("PUBLISHER_BASE_PATH", "").rstrip("/")}/api/v1/versions/{version_id}/assets/{quote(name)}')
         img.attrs = {k: v for k, v in img.attrs.items() if k in ('src', 'alt')}
     html = '<section class="article">' + str(soup) + '</section>'
     css = template_css if template_css is not None else (TEMPLATE_DIR / f'{template}.css').read_text()

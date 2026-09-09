@@ -3,13 +3,15 @@ WORKDIR /build
 COPY publisher/frontend/package*.json ./
 RUN npm ci --no-audit --no-fund
 COPY publisher/frontend/ ./
-RUN npm run build
+ARG PUBLISHER_BASE_PATH=/
+RUN npm run build -- --base="$PUBLISHER_BASE_PATH"
 
 FROM python:3.12-slim
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PUBLISHER_DATA_DIR=/app/data
 WORKDIR /app
 COPY publisher/requirements.txt /app/requirements.txt
-RUN pip install --no-cache-dir -r requirements.txt && useradd --uid 10001 --create-home publisher
+ARG PIP_INDEX_URL=https://pypi.org/simple
+RUN pip install --no-cache-dir --index-url "$PIP_INDEX_URL" -r requirements.txt && useradd --uid 10001 --create-home publisher
 COPY publisher/__init__.py /app/publisher/__init__.py
 COPY publisher/backend /app/publisher/backend
 COPY publisher/config /app/publisher/config

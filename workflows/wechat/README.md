@@ -104,6 +104,14 @@ sudo systemctl reload nginx
 
 证书续期沿用原有方案。此示例不安装 Caddy，也不会自动申请证书。若原 Nginx 在容器中而非宿主机，请先调整容器网络；容器内的127.0.0.1不是宿主机。
 
+### 复用现有 Docker Nginx 网关
+
+若公网 80/443 已由 StockLab 的 Docker Nginx 网关占用，使用 `deploy/docker-compose.tencent.yml` 启动 Publisher。它会加入外部网络 `stocklab_application`，并以 `wechat-publisher:8000` 向网关提供服务。
+
+此部署使用 `https://stocklab.hardway.top/publisher/`，复用现有域名和证书。`PUBLISHER_ORIGIN` 必须为 `https://stocklab.hardway.top`（不包含路径）。Compose 中的构建参数 `/publisher/` 控制前端资源和 API 路径，运行时 `PUBLISHER_BASE_PATH=/publisher` 控制预览图片 URL 与 Cookie 路径。
+
+在网关 HTTPS `server{}` 中加入 `include /etc/nginx/publisher-subpath.conf;`，把 `deploy/nginx/publisher-subpath.conf` 只读挂载到该路径。把修改后的 HTTPS 模板只读挂载到 `/etc/nginx/templates/stocklab-https.conf`，以便网关重建后仍保留入口。先备份原 Compose 与模板，校验 `nginx -t` 后只重建 gateway 服务。原来的首页和 `/api/` 路由继续由 StockLab 处理。GitHub Secret `PUBLISHER_URL` 使用 `https://stocklab.hardway.top/publisher`。
+
 5. 登录工作台，创建 GitHub 上传 Token，填入 GitHub Secrets；公众号后台把腾讯云实际出口 IPv4 加入 API 白名单。
 6. 运行验收文章导入，检查三模板、历史版本和图片顺序；发送草稿并取回比较；在微信后台/手机检查真实显示。确认公众号具备权限后，由管理员明确确认一次测试文章的正式发布，再查询结果。
 

@@ -20,8 +20,8 @@ def main():
         import httpx
         url=os.environ['PUBLISHER_URL'].rstrip('/')
         parsed=urlsplit(url)
-        if parsed.scheme!='https' or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment or parsed.path not in ('','/'):
-            raise SystemExit('PUBLISHER_URL 必须为不含路径、凭证的HTTPS源地址')
+        if parsed.scheme!='https' or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment or parsed.path not in ('','/','/publisher'):
+            raise SystemExit('PUBLISHER_URL 必须为HTTPS源地址或其 /publisher 子路径，且不能包含凭证或查询参数')
         token=os.environ['PUBLISHER_UPLOAD_TOKEN']
         with package.open('rb') as f:
             try:
