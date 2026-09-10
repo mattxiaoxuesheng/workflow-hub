@@ -1,0 +1,13 @@
+app:
+  name: 微信公众号发布平台
+  timezone: Asia/Shanghai
+article:
+  default_template: business
+  max_upload_mb: 50
+  max_unpacked_mb: 100
+  max_files: 100
+wechat:
+  enable_draft: true
+  enable_publish: true
+security:
+  session_expire_hours: 12

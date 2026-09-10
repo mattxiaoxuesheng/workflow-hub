@@ -1,0 +1,42 @@
+services:
+  publisher:
+    build:
+      context: ..
+      dockerfile: publisher/Dockerfile
+      args:
+        PUBLISHER_BASE_PATH: /publisher/
+        PIP_INDEX_URL: https://mirrors.cloud.tencent.com/pypi/simple
+    restart: unless-stopped
+    environment:
+      PUBLISHER_BASE_PATH: /publisher
+    ports:
+      - '127.0.0.1:8088:8000'
+    expose:
+      - '8000'
+    env_file:
+      - /opt/wechat-publisher/secrets/publisher.env
+    volumes:
+      - /opt/wechat-publisher/data:/app/data
+      - ../publisher/config:/app/publisher/config:ro
+      - ../publisher/templates:/app/publisher/templates:ro
+    read_only: true
+    tmpfs:
+      - /tmp:size=128m,mode=1777
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 768m
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '3'
+    networks:
+      stocklab_application:
+        aliases:
+          - wechat-publisher
+
+networks:
+  stocklab_application:
+    external: true
+    name: stocklab_application
