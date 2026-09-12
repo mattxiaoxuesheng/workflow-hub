@@ -1,0 +1,47 @@
+name: Publisher HTTP IP 上传测试（一次性）
+run-name: 'Publisher HTTP IP upload test | ${{ github.run_number }}'
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/publisher-http-ip-upload-test.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: wechat-ingest-main
+  cancel-in-progress: false
+
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r publisher/requirements.txt
+      - name: 检查 HTTP IP Publisher
+        run: |
+          curl --fail --show-error --silent             --connect-timeout 10 --max-time 20             -D /tmp/headers.txt             -o /tmp/health.json             http://122.51.36.123/publisher/healthz
+          sed -n '1,20p' /tmp/headers.txt
+          head -c 300 /tmp/health.json
+          echo
+      - name: 校验并打包
+        run: python -m workflows.wechat.package --article 'inputs/wechat/alien-mind-20260912'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wechat-http-ip-package-${{ github.run_id }}
+          path: output/wechat/article-package.zip
+          if-no-files-found: error
+          retention-days: 30
+      - name: 通过 HTTP IP 上传腾讯云 Publisher
+        env:
+          PUBLISHER_URL: http://122.51.36.123/publisher
+          PUBLISHER_UPLOAD_TOKEN: ${{ secrets.PUBLISHER_UPLOAD_TOKEN }}
+        run: python -m workflows.wechat.package --article 'inputs/wechat/alien-mind-20260912' --upload
