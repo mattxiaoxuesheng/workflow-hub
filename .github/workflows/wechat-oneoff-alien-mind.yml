@@ -34,6 +34,29 @@ jobs:
           path: output/wechat/article-package.zip
           if-no-files-found: error
           retention-days: 30
+      - name: 诊断 Publisher 公网连接
+        env:
+          PUBLISHER_URL: ${{ secrets.PUBLISHER_URL }}
+        run: |
+          python - <<'PY'
+          import os, socket
+          from urllib.parse import urlsplit
+          import httpx
+          url = os.environ.get('PUBLISHER_URL', '').rstrip('/')
+          if not url:
+              raise SystemExit('PUBLISHER_URL 未配置')
+          parsed = urlsplit(url)
+          print(f'scheme={parsed.scheme} host={parsed.hostname} path={parsed.path or "/"}')
+          try:
+              print(f'dns=ok ip={socket.gethostbyname(parsed.hostname)}')
+          except Exception as exc:
+              print(f'dns=failed {type(exc).__name__}: {exc}')
+          try:
+              response = httpx.get(url + '/healthz', timeout=15, follow_redirects=False)
+              print(f'health_http={response.status_code} content_type={response.headers.get("content-type", "")[:80]}')
+          except Exception as exc:
+              print(f'health_error={type(exc).__name__}: {str(exc).replace(url, "<publisher>")}')
+          PY
       - name: 上传腾讯云 Publisher
         env:
           PUBLISHER_URL: ${{ secrets.PUBLISHER_URL }}
