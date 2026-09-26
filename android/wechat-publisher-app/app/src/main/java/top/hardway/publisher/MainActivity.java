@@ -1,6 +1,7 @@
 package top.hardway.publisher;
 
 import android.app.Activity;
+import android.annotation.SuppressLint;
 import android.content.ActivityNotFoundException;
 import android.content.Intent;
 import android.graphics.Color;
@@ -8,8 +9,8 @@ import android.net.Uri;
 import android.net.http.SslError;
 import android.os.Build;
 import android.os.Bundle;
-import android.provider.Settings;
 import android.view.View;
+import android.window.OnBackInvokedDispatcher;
 import android.view.ViewGroup;
 import android.view.WindowInsets;
 import android.webkit.CookieManager;
@@ -66,6 +67,7 @@ public final class MainActivity extends Activity {
         setContentView(root);
 
         configureWebView();
+        configureBackNavigation();
 
         if (savedInstanceState == null) {
             webView.loadUrl(START_URL);
@@ -196,10 +198,27 @@ public final class MainActivity extends Activity {
         super.onSaveInstanceState(outState);
     }
 
-    @Override
-    public void onBackPressed() {
+    private void configureBackNavigation() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            getOnBackInvokedDispatcher().registerOnBackInvokedCallback(
+                    OnBackInvokedDispatcher.PRIORITY_DEFAULT,
+                    this::handleBack);
+        }
+    }
+
+    private void handleBack() {
         if (webView != null && webView.canGoBack()) {
             webView.goBack();
+        } else {
+            finish();
+        }
+    }
+
+    @SuppressLint("GestureBackNavigation")
+    @Override
+    public void onBackPressed() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+            handleBack();
         } else {
             super.onBackPressed();
         }
