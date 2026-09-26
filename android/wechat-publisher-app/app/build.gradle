@@ -2,6 +2,9 @@ plugins {
     id 'com.android.application'
 }
 
+def publisherAppToken = (project.findProperty('publisherAppToken') ?: '').toString()
+def escapedPublisherAppToken = publisherAppToken.replace('\\', '\\\\').replace('"', '\\"')
+
 android {
     namespace 'top.hardway.publisher'
     compileSdk 36
@@ -11,7 +14,12 @@ android {
         minSdk 26
         targetSdk 36
         versionCode 1
-        versionName '1.0.0'
+        versionName '1.1.0'
+        buildConfigField 'String', 'PUBLISHER_APP_TOKEN', '"' + escapedPublisherAppToken + '"'
+    }
+
+    buildFeatures {
+        buildConfig true
     }
 
     buildTypes {
