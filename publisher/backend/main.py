@@ -12,7 +12,7 @@ import yaml
 from argon2 import PasswordHasher
 from argon2.exceptions import VerificationError
 from fastapi import FastAPI, Request, HTTPException, UploadFile, File, Depends
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from PIL import Image
 from pydantic import BaseModel, Field
@@ -60,7 +60,10 @@ def create_app(data_dir=None, testing=False, wechat=None):
     dummy_hash = password_hasher.hash(secrets.token_urlsafe(24))
     secure = not testing and os.getenv('COOKIE_SECURE', 'true').lower() != 'false'
     origin = os.getenv('PUBLISHER_ORIGIN', '').rstrip('/')
-    cookie_path = os.getenv('PUBLISHER_BASE_PATH', '').rstrip('/') + '/'
+    base_path = os.getenv('PUBLISHER_BASE_PATH', '').rstrip('/')
+    cookie_path = base_path + '/'
+    android_token = os.getenv('PUBLISHER_ANDROID_TOKEN', '')
+    android_user = os.getenv('PUBLISHER_ANDROID_USER', 'admin')
 
     def log(c, actor, action, target=''):
         c.execute(insert(db.audit).values(actor=str(actor), action=action, target=str(target), created_at=time.time()))
@@ -99,6 +102,25 @@ def create_app(data_dir=None, testing=False, wechat=None):
 
     @app.get('/healthz')
     def health(): return {'status': 'ok'}
+
+    @app.get('/api/v1/app-login')
+    def app_login(request: Request):
+        supplied = request.headers.get('x-publisher-app-token', '')
+        if not android_token or not supplied or not hmac.compare_digest(supplied, android_token):
+            raise HTTPException(401, 'App 自动登录凭证无效')
+        now = time.time()
+        with engine.begin() as c:
+            u = c.execute(select(db.users).where(db.users.c.username == android_user)).mappings().first()
+            if not u or u['status'] != 'active' or u['role'] != 'ADMIN':
+                raise HTTPException(503, 'App 自动登录管理员不可用')
+            sid, csrf = secrets.token_urlsafe(32), secrets.token_urlsafe(32)
+            ttl = int(cfg['security']['session_expire_hours'] * 3600)
+            c.execute(delete(db.sessions).where(db.sessions.c.expires_at < now))
+            c.execute(insert(db.sessions).values(token_hash=digest(sid), user_id=u['id'], csrf=csrf, expires_at=now+ttl))
+            log(c, u['username'], 'app_login')
+        result = RedirectResponse(url=(base_path + '/') or '/', status_code=303)
+        result.set_cookie('publisher_session', sid, max_age=ttl, secure=secure, httponly=True, samesite='strict', path=cookie_path)
+        return result
 
     @app.post('/api/v1/login')
     def login(body: Login, request: Request):
