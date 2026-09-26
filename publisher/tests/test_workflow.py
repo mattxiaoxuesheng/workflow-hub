@@ -31,9 +31,7 @@ class FakeWeChat:
         raise AssertionError(endpoint)
 
 @pytest.fixture
-def env(tmp_path, monkeypatch):
-    monkeypatch.setenv('PUBLISHER_ANDROID_TOKEN','test-android-token')
-    monkeypatch.setenv('PUBLISHER_ANDROID_USER','admin')
+def env(tmp_path):
     fake=FakeWeChat(); app=create_app(tmp_path/'data',testing=True,wechat=fake)
     with app.state.engine.begin() as c:
         for username,role in [('admin','ADMIN'),('editor','EDITOR')]:
@@ -48,20 +46,6 @@ def env(tmp_path, monkeypatch):
         return client.post('/api/v1/ingest',headers={'authorization':'Bearer '+secret},files={'package':('article.zip',content,'application/zip')})
     yield app,client,fake,ingest,token,package
     client.close(); app.state.engine.dispose()
-
-def test_android_app_auto_login(env):
-    app,c,w,ingest,token,package=env
-    anon=TestClient(app,headers={'origin':'http://testserver'})
-    assert anon.get('/api/v1/articles').status_code==401
-    assert anon.get('/api/v1/app-login',headers={'x-publisher-app-token':'wrong'},follow_redirects=False).status_code==401
-    login=anon.get('/api/v1/app-login',headers={'x-publisher-app-token':'test-android-token'},follow_redirects=False)
-    assert login.status_code==303
-    assert login.headers['location']=='/'
-    me=anon.get('/api/v1/me')
-    assert me.status_code==200
-    assert me.json()['username']=='admin'
-    assert me.json()['role']=='ADMIN'
-    anon.close()
 
 def test_full_version_draft_publish_and_idempotency(env):
     app,c,w,ingest,token,package=env

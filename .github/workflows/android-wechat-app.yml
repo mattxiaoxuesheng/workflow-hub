@@ -36,26 +36,12 @@ jobs:
         with:
           gradle-version: '9.6.0'
 
-      - name: Generate personal App credential
-        shell: bash
-        run: |
-          TOKEN="app_$(python -c 'import secrets; print(secrets.token_urlsafe(48))')"
-          echo "::add-mask::$TOKEN"
-          echo "PUBLISHER_APP_TOKEN=$TOKEN" >> "$GITHUB_ENV"
-          {
-            echo "# Keep this file private. Merge these values into /opt/wechat-publisher/secrets/publisher.env"
-            echo "PUBLISHER_ANDROID_TOKEN=$TOKEN"
-            echo "PUBLISHER_ANDROID_USER=admin"
-          } > publisher-android.env
-
       - name: Lint, test, and build
-        run: gradle -p android/wechat-publisher-app clean lintDebug testDebugUnitTest assembleDebug -PpublisherAppToken="$PUBLISHER_APP_TOKEN" --stacktrace
+        run: gradle -p android/wechat-publisher-app clean lintDebug testDebugUnitTest assembleDebug --stacktrace
 
       - uses: actions/upload-artifact@v4
         with:
           name: wechat-publisher-android-debug
-          path: |
-            android/wechat-publisher-app/app/build/outputs/apk/debug/app-debug.apk
-            publisher-android.env
+          path: android/wechat-publisher-app/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 30
