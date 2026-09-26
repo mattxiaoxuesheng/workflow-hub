@@ -26,8 +26,12 @@ import android.widget.FrameLayout;
 import android.widget.ProgressBar;
 import android.widget.Toast;
 
+import java.util.HashMap;
+import java.util.Map;
+
 public final class MainActivity extends Activity {
     private static final String START_URL = "https://stocklab.hardway.top/publisher/";
+    private static final String AUTO_LOGIN_URL = "https://stocklab.hardway.top/publisher/api/v1/app-login";
     private static final int FILE_CHOOSER_REQUEST = 2001;
 
     private WebView webView;
@@ -70,7 +74,7 @@ public final class MainActivity extends Activity {
         configureBackNavigation();
 
         if (savedInstanceState == null) {
-            webView.loadUrl(START_URL);
+            loadAppSession();
         } else {
             webView.restoreState(savedInstanceState);
         }
@@ -103,6 +107,10 @@ public final class MainActivity extends Activity {
                     return false;
                 }
                 String url = request.getUrl().toString();
+                if ("workflowhub".equals(request.getUrl().getScheme()) && "reauth".equals(request.getUrl().getHost())) {
+                    loadAppSession();
+                    return true;
+                }
                 if (PublisherUrlPolicy.isAllowed(url)) {
                     return false;
                 }
@@ -121,7 +129,15 @@ public final class MainActivity extends Activity {
                     WebView view,
                     WebResourceRequest request,
                     WebResourceResponse errorResponse) {
-                if (request.isForMainFrame() && errorResponse.getStatusCode() >= 500) {
+                if (!request.isForMainFrame()) {
+                    return;
+                }
+                String failedUrl = request.getUrl().toString();
+                if (AUTO_LOGIN_URL.equals(failedUrl) && errorResponse.getStatusCode() >= 400) {
+                    showAutoLoginError(errorResponse.getStatusCode());
+                    return;
+                }
+                if (errorResponse.getStatusCode() >= 500) {
                     Toast.makeText(MainActivity.this, R.string.server_error, Toast.LENGTH_SHORT).show();
                 }
             }
@@ -171,6 +187,31 @@ public final class MainActivity extends Activity {
 
         webView.setDownloadListener((url, userAgent, contentDisposition, mimetype, contentLength) ->
                 openExternal(url));
+    }
+
+    private void loadAppSession() {
+        String token = BuildConfig.PUBLISHER_APP_TOKEN;
+        if (token == null || token.isEmpty()) {
+            showAutoLoginError(0);
+            return;
+        }
+        Map<String, String> headers = new HashMap<>();
+        headers.put("X-Publisher-App-Token", token);
+        progressBar.setVisibility(View.VISIBLE);
+        webView.loadUrl(AUTO_LOGIN_URL, headers);
+    }
+
+    private void showAutoLoginError(int statusCode) {
+        String detail = statusCode == 0
+                ? "APK 没有自动登录凭证。"
+                : "服务器尚未启用此 APK 的自动登录凭证（HTTP " + statusCode + "）。";
+        String html = "<!doctype html><html><head><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+                + "<style>body{font-family:sans-serif;padding:28px;line-height:1.7;color:#182c43}"
+                + "h2{margin-top:0}code{word-break:break-all;background:#f1f5f9;padding:2px 5px}</style></head><body>"
+                + "<h2>公众号发布 App</h2><p>" + detail + "</p>"
+                + "<p>请先把与这个 APK 同批生成的 <code>publisher-android.env</code> 配置到服务器并部署新版 Publisher。</p>"
+                + "</body></html>";
+        webView.loadDataWithBaseURL(START_URL, html, "text/html", "utf-8", null);
     }
 
     private void openExternal(String url) {
