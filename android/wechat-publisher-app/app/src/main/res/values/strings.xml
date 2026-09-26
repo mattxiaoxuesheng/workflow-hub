@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">公众号发布</string>
+    <string name="ssl_error">HTTPS 证书校验失败，已停止连接。</string>
+    <string name="server_error">Publisher 服务暂时不可用，请稍后刷新。</string>
+    <string name="no_file_picker">无法打开文件选择器。</string>
+    <string name="no_browser">没有可用的浏览器打开此链接。</string>
+</resources>

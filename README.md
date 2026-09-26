@@ -6,6 +6,7 @@
 |---|---|---|
 | 文稿转播客 | 标准 MD → 单人或双人 MP3，含前奏片尾；无需大模型 API | [播客说明](workflows/podcast/README.md) |
 | 微信公众号发布 | MD+图片内容包 → 腾讯云编辑、排版、版本、草稿与正式发布 | [公众号说明](workflows/wechat/README.md) |
+| 公众号 Android App | 手机查看、编辑、上传图片、草稿与正式发布；复用 Publisher 权限和 UI | [Android App](android/wechat-publisher-app/README.md) |
 
 ## 给 ChatGPT / Codex 的提示词
 
