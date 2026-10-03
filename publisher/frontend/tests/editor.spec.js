@@ -11,7 +11,12 @@ async function create(page, title) {
   await page.getByRole("button", { name: "＋ 新建文章" }).click();
   await page.getByRole("textbox", { name: "标题", exact: true }).fill(title);
   await page.getByRole("button", { name: "开始写作" }).click();
-  await page.locator(".tiptap").waitFor();
+  await expect(page.getByLabel("文章标题", { exact: true })).toHaveValue(title);
+  await expect(page.getByLabel("文章标题", { exact: true })).toBeEnabled();
+  await expect(page.locator(".tiptap")).toHaveAttribute(
+    "contenteditable",
+    "true",
+  );
 }
 async function saved(page) {
   await expect(
@@ -159,10 +164,18 @@ test("navigation pauses editing while the next draft loads", async ({
   await page.locator(".tiptap").click();
   await page.keyboard.type("Keep first draft");
   await saved(page);
+  // Creation keeps the previous editor mounted while the new draft is fetched.
+  await page.route("**/api/v2/articles/*/draft", async (route) => {
+    if (route.request().method() === "GET")
+      await new Promise((r) => setTimeout(r, 1200));
+    await route.continue();
+  });
   await create(page, "Navigation second");
   await page.locator(".tiptap").click();
   await page.keyboard.type("Second draft");
+  await expect(page.locator(".tiptap")).toHaveText("Second draft");
   await saved(page);
+  await page.unroute("**/api/v2/articles/*/draft");
   await page
     .getByLabel("文章", { exact: true })
     .selectOption({ label: "Navigation first" });
