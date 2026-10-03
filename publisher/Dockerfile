@@ -1,7 +1,10 @@
+# syntax=docker/dockerfile:1
 FROM node:22-bookworm-slim AS frontend
 WORKDIR /build
 COPY publisher/frontend/package*.json ./
-RUN npm ci --no-audit --no-fund
+RUN --mount=type=secret,id=proxy_ca \
+    if [ -f /run/secrets/proxy_ca ]; then export NODE_EXTRA_CA_CERTS=/run/secrets/proxy_ca; fi; \
+    npm ci --no-audit --no-fund
 COPY publisher/frontend/ ./
 ARG PUBLISHER_BASE_PATH=/
 RUN npm run build -- --base="$PUBLISHER_BASE_PATH"
@@ -11,13 +14,15 @@ ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PUBLISHER_DATA_DIR=/app/data
 WORKDIR /app
 COPY publisher/requirements.txt /app/requirements.txt
 ARG PIP_INDEX_URL=https://pypi.org/simple
-RUN pip install --no-cache-dir --index-url "$PIP_INDEX_URL" -r requirements.txt && useradd --uid 10001 --create-home publisher
+RUN --mount=type=secret,id=proxy_ca \
+    if [ -f /run/secrets/proxy_ca ]; then export PIP_CERT=/run/secrets/proxy_ca; fi; \
+    pip install --no-cache-dir --index-url "$PIP_INDEX_URL" -r requirements.txt && useradd --uid 10001 --create-home publisher
 COPY publisher/__init__.py /app/publisher/__init__.py
 COPY publisher/backend /app/publisher/backend
 COPY publisher/config /app/publisher/config
 COPY publisher/templates /app/publisher/templates
 COPY --from=frontend /build/dist /app/publisher/frontend/dist
-RUN mkdir -p /app/data && chown publisher:publisher /app/data
+RUN chmod -R a+rX /app/publisher && mkdir -p /app/data && chown publisher:publisher /app/data
 USER publisher
 EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz',timeout=3)"

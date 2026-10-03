@@ -1,15 +1,15 @@
 name: WeChat Publisher offline CI
 on:
   push:
-    paths: ['publisher/**', 'workflows/wechat/**', 'inputs/wechat/**', 'deploy/**', '.github/workflows/wechat-*.yml']
+    paths: ['publisher/**', 'workflows/wechat/**',  'deploy/**', '.github/workflows/wechat-*.yml']
   pull_request:
-    paths: ['publisher/**', 'workflows/wechat/**', 'inputs/wechat/**', 'deploy/**', '.github/workflows/wechat-*.yml']
+    paths: ['publisher/**', 'workflows/wechat/**',  'deploy/**', '.github/workflows/wechat-*.yml']
 permissions:
   contents: read
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
         with:
@@ -29,12 +29,20 @@ jobs:
         working-directory: publisher/frontend
       - run: npm run build
         working-directory: publisher/frontend
+      - run: npx playwright install --with-deps chromium
+        working-directory: publisher/frontend
+      - run: npm run test:browser
+        working-directory: publisher/frontend
       - name: Prepare sample deployment configuration
         run: |
           sudo install -d -m 700 /opt/wechat-publisher/secrets
           sudo install -m 600 deploy/.env.example /opt/wechat-publisher/secrets/publisher.env
           sudo docker compose -f deploy/docker-compose.yml config --quiet
       - run: docker build -f publisher/Dockerfile -t wechat-publisher:ci .
+      - name: Deployment success and rollback simulation
+        run: |
+          docker run --rm --network none --user 0 --entrypoint python -v "$PWD:/work:ro" wechat-publisher:ci /work/publisher/tests/deployment_sim.py success
+          docker run --rm --network none --user 0 --entrypoint python -v "$PWD:/work:ro" wechat-publisher:ci /work/publisher/tests/deployment_sim.py failure
       - name: Container startup and frontend smoke check
         run: |
           docker run -d --name publisher-ci --read-only --tmpfs /tmp --tmpfs /app/data:uid=10001,gid=10001 -e PUBLISHER_ORIGIN=https://test.invalid wechat-publisher:ci
