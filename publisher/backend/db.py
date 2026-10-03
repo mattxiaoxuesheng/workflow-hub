@@ -96,6 +96,7 @@ publications = Table(
     Column("html_sent", Text),
     Column("cover_media_id", String),
     Column("html_hash", String),
+    Column("prepared_images", Text),
     Column("html_returned", Text),
     Column("result", Text),
     Column("created_at", Float),
@@ -124,6 +125,18 @@ drafts = Table(
     Column("revision", Integer, nullable=False, default=1),
     Column("updated_at", Float),
     Column("updated_by", String),
+)
+shared_assets = Table(
+    "shared_assets",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("sha256", String, nullable=False, unique=True),
+    Column("path", String, nullable=False),
+    Column("filename", String, nullable=False),
+    Column("mime", String, nullable=False),
+    Column("size", Integer, nullable=False),
+    Column("created_at", Float),
+    Column("deleted_at", Float),
 )
 library = Table(
     "asset_library",
@@ -159,6 +172,7 @@ def open_db(path):
             "wechat_publications": {
                 "cover_media_id": "VARCHAR",
                 "html_hash": "VARCHAR",
+                "prepared_images": "TEXT",
             },
         }
         for table, fields in additions.items():

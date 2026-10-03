@@ -35,6 +35,15 @@ with tempfile.TemporaryDirectory() as temp:
                     "SELECT DISTINCT sha256 FROM asset_library WHERE deleted_at IS NULL"
                 )
             )
+        if c.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='shared_assets'"
+        ).fetchone():
+            hashes.update(
+                r[0]
+                for r in c.execute(
+                    "SELECT DISTINCT sha256 FROM shared_assets WHERE deleted_at IS NULL"
+                )
+            )
     with name.open("xb") as output:
         name.chmod(0o600)
         with tarfile.open(fileobj=output, mode="w:gz") as tar:

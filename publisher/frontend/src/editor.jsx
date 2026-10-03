@@ -91,6 +91,63 @@ const ArticleImage = Image.extend({
     ];
   },
 });
+const imageUrl = (url) => import.meta.env.BASE_URL + url.replace(/^\//, "");
+const imageSize = (bytes) =>
+  bytes >= 1024 ** 2
+    ? `${(bytes / 1024 ** 2).toFixed(2)} MB`
+    : `${Math.ceil(bytes / 1024)} KB`;
+function ImageComparison({ images }) {
+  return (
+    <details className="image-comparison">
+      <summary>查看微信图片副本 / 原图对比</summary>
+      <p>
+        原图保留。点击图片可打开大图检查文字和细节；下面的副本将用于发送微信。
+      </p>
+      {images.map((info) => (
+        <section key={info.url}>
+          <h4>
+            {info.role === "cover" ? "封面副本" : "正文副本"} ·{" "}
+            {info.mime === "image/png" ? "PNG" : "JPG"}
+          </h4>
+          <p>
+            {info.original_width} × {info.original_height} ·{" "}
+            {imageSize(info.original_size)} → {info.width} × {info.height} ·{" "}
+            {imageSize(info.size)} · 已满足大小限制
+          </p>
+          {info.transparency_flattened && (
+            <p>透明背景已转换为白色，请检查显示效果。</p>
+          )}
+          <div className="image-comparison-grid">
+            <a
+              href={imageUrl(info.original_url)}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              <img
+                src={imageUrl(info.original_url)}
+                alt="原图"
+                loading="lazy"
+              />
+              原图
+            </a>
+            <a
+              href={imageUrl(info.url)}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              <img
+                src={imageUrl(info.url)}
+                alt={info.role === "cover" ? "微信封面副本" : "微信正文副本"}
+                loading="lazy"
+              />
+              微信副本（点击放大）
+            </a>
+          </div>
+        </section>
+      ))}
+    </details>
+  );
+}
 export default function Workspace({ api, user, exitRef }) {
   const [items, setItems] = useState([]),
     [aid, setAid] = useState(null),
@@ -99,6 +156,14 @@ export default function Workspace({ api, user, exitRef }) {
     [version, setVersion] = useState(null),
     [tab, setTab] = useState("edit"),
     [assets, setAssets] = useState([]),
+    [sharedOpen, setSharedOpen] = useState(false),
+    [sharedItems, setSharedItems] = useState({
+      items: [],
+      total: 0,
+      offset: 0,
+      limit: 30,
+    }),
+    [sharedQuery, setSharedQuery] = useState(""),
     [error, setError] = useState(""),
     [notice, setNotice] = useState(""),
     [busy, setBusy] = useState(false),
@@ -111,6 +176,7 @@ export default function Workspace({ api, user, exitRef }) {
     [navigating, setNavigating] = useState(false),
     [, tick] = useState(0);
   const live = useRef(null),
+    sharedTarget = useRef(null),
     ack = useRef(""),
     queue = useRef(Promise.resolve()),
     conflict = useRef(false),
@@ -123,6 +189,69 @@ export default function Workspace({ api, user, exitRef }) {
   }
   async function material(id = aid) {
     setAssets(await api(`/articles/${id}/assets`, {}, 2));
+  }
+  async function sharedList(offset = 0, query = sharedQuery) {
+    setSharedItems(
+      await api(
+        `/shared-assets?q=${encodeURIComponent(query)}&offset=${offset}`,
+        {},
+        2,
+      ),
+    );
+  }
+  async function openShared(replace = false) {
+    sharedTarget.current =
+      draft && tab === "edit" && editor && !navigating
+        ? {
+            aid: draft.article_id,
+            pos: editor.state.selection.from,
+            replace,
+            src: replace
+              ? editor.state.doc.nodeAt(editor.state.selection.from)?.attrs.src
+              : null,
+            editor,
+          }
+        : null;
+    setSharedOpen(true);
+    setSharedQuery("");
+    await sharedList(0, "");
+  }
+  async function chooseShared(asset, cover = false) {
+    const target = sharedTarget.current;
+    if (
+      !target ||
+      live.current?.article_id !== target.aid ||
+      target.editor.isDestroyed
+    )
+      throw Error("请先打开要编辑的文章");
+    await flush();
+    const a = await api(
+      `/articles/${target.aid}/shared-assets/${asset.id}`,
+      { method: "POST" },
+      2,
+    );
+    if (live.current?.article_id !== target.aid || target.editor.isDestroyed)
+      throw Error("文章已切换，请重新选择素材");
+    if (cover) setDraft((d) => ({ ...d, cover: a.path }));
+    else if (target.replace) {
+      const node = target.editor.state.doc.nodeAt(target.pos);
+      if (!node || node.type.name !== "image" || node.attrs.src !== target.src)
+        throw Error("原图片位置已变化，请重新选择");
+      target.editor.commands.command(({ tr }) => {
+        tr.setNodeMarkup(target.pos, undefined, { ...node.attrs, src: a.path });
+        return true;
+      });
+    } else
+      target.editor
+        .chain()
+        .focus()
+        .insertContentAt(target.pos, {
+          type: "image",
+          attrs: { src: a.path, alt: asset.filename },
+        })
+        .run();
+    setSharedOpen(false);
+    await material(target.aid);
   }
   function run(fn) {
     setError("");
@@ -260,8 +389,8 @@ export default function Workspace({ api, user, exitRef }) {
     [aid],
   );
   useEffect(() => {
-    editor?.setEditable(!navigating);
-  }, [editor, navigating]);
+    editor?.setEditable(!navigating && !sharedOpen);
+  }, [editor, navigating, sharedOpen]);
   async function open(id) {
     setNavigating(true);
     editor?.setEditable(false);
@@ -325,6 +454,7 @@ export default function Workspace({ api, user, exitRef }) {
   }
   async function upload(file) {
     if (!live.current) return;
+    if (file.size > 10 * 1024 ** 2) throw Error("图片最大10MB");
     const id = live.current.article_id,
       pos = editor.state.selection.from,
       j = job.current;
@@ -483,6 +613,12 @@ export default function Workspace({ api, user, exitRef }) {
         </div>
       )}
       <section className="articlebar">
+        <button
+          disabled={busy || navigating}
+          onClick={() => run(() => openShared())}
+        >
+          共享素材库
+        </button>
         <button disabled={busy} onClick={() => setCreating(true)}>
           ＋ 新建文章
         </button>
@@ -530,7 +666,7 @@ export default function Workspace({ api, user, exitRef }) {
           <select
             aria-label="文章"
             value={aid || ""}
-            disabled={busy || saving}
+            disabled={busy || saving || sharedOpen}
             onChange={(e) => {
               const id = Number(e.target.value);
               if (id) run(() => open(id));
@@ -634,7 +770,10 @@ export default function Workspace({ api, user, exitRef }) {
             </span>
           </section>
           <div hidden={tab !== "edit"}>
-            <fieldset disabled={navigating} className="editor-controls">
+            <fieldset
+              disabled={navigating || sharedOpen}
+              className="editor-controls"
+            >
               <div
                 className="edit-tools"
                 onMouseDown={(e) => {
@@ -855,6 +994,12 @@ export default function Workspace({ api, user, exitRef }) {
                     替换
                   </button>
                   <button
+                    disabled={busy}
+                    onClick={() => run(() => openShared(true))}
+                  >
+                    从共享库替换
+                  </button>
+                  <button
                     onClick={() =>
                       editor.chain().focus().deleteSelection().run()
                     }
@@ -892,7 +1037,7 @@ export default function Workspace({ api, user, exitRef }) {
                 ref={input}
                 hidden
                 type="file"
-                accept="image/png,image/jpeg"
+                accept="image/png,image/jpeg,image/webp"
                 onChange={(e) => {
                   const f = e.target.files[0];
                   if (f) run(() => upload(f));
@@ -923,7 +1068,10 @@ export default function Workspace({ api, user, exitRef }) {
               </footer>
               <details>
                 <summary>素材库 · {assets.length} 张</summary>
-                <p>删除正文图片只移除引用。历史版本引用的素材不能永久删除。</p>
+                <p>
+                  支持 JPG / PNG / WebP，每张最大
+                  10MB。自动生成微信图片副本，原图保留。删除正文图片只移除引用。历史版本引用的素材不能永久删除。
+                </p>
                 <label>
                   封面
                   <select
@@ -947,6 +1095,16 @@ export default function Workspace({ api, user, exitRef }) {
                         src={`${base}/articles/${aid}/assets/${a.path}`}
                         alt="素材"
                       />
+                      {a.publication_images && (
+                        <ImageComparison
+                          images={Object.values(a.publication_images).map(
+                            (info) => ({
+                              ...info,
+                              original_url: `/api/v2/articles/${aid}/assets/${a.path}`,
+                            }),
+                          )}
+                        />
+                      )}
                       <button
                         className="secondary"
                         onClick={() =>
@@ -1053,6 +1211,12 @@ export default function Workspace({ api, user, exitRef }) {
                 sandbox="allow-same-origin"
                 srcDoc={frame(preview.html)}
               />
+              {preview.compression_notice && (
+                <p>{preview.compression_notice}</p>
+              )}
+              {!!preview.images?.length && (
+                <ImageComparison images={preview.images} />
+              )}
               <footer>
                 <button className="secondary" onClick={() => setTab("edit")}>
                   返回修改
@@ -1193,6 +1357,147 @@ export default function Workspace({ api, user, exitRef }) {
             </section>
           )}
         </>
+      )}
+      {sharedOpen && (
+        <div className="modalback">
+          <section
+            className="modal shared-library"
+            role="dialog"
+            aria-modal="true"
+            aria-label="共享素材库"
+          >
+            <h2>共享素材库</h2>
+            <p>
+              所有登录用户共用。上传图片不会自动插入文章；被工作稿、封面或历史版本引用的素材不能删除。
+            </p>
+            <label>
+              上传素材（JPG / PNG / WebP，每张最大 10MB）
+              <input
+                type="file"
+                aria-label="上传共享素材"
+                accept="image/png,image/jpeg,image/webp"
+                multiple
+                disabled={busy}
+                onChange={(e) => {
+                  const files = Array.from(e.target.files || []);
+                  e.target.value = "";
+                  run(async () => {
+                    for (const file of files) {
+                      if (file.size > 10 * 1024 ** 2)
+                        throw Error(`${file.name}：图片最大10MB`);
+                      const body = new FormData();
+                      body.append("file", file);
+                      await api("/shared-assets", { method: "POST", body }, 2);
+                    }
+                    setSharedQuery("");
+                    await sharedList(0, "");
+                  });
+                }}
+              />
+            </label>
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                run(() => sharedList());
+              }}
+            >
+              <input
+                aria-label="搜索素材名称"
+                value={sharedQuery}
+                onChange={(e) => setSharedQuery(e.target.value)}
+              />
+              <button disabled={busy}>搜索</button>
+            </form>
+            {error && (
+              <p role="alert" className="error">
+                {error}
+              </p>
+            )}
+            <p>{busy ? "正在处理素材…" : `共 ${sharedItems.total} 张素材`}</p>
+            <div className="asset-grid">
+              {sharedItems.items.map((a) => (
+                <article key={a.id}>
+                  <img
+                    src={imageUrl(a.original_url)}
+                    alt={a.filename}
+                    loading="lazy"
+                  />
+                  <p>
+                    {a.filename} · {imageSize(a.size)}
+                  </p>
+                  <ImageComparison
+                    images={Object.values(a.publication_images).map((info) => ({
+                      ...info,
+                      original_url: a.original_url,
+                    }))}
+                  />
+                  <button
+                    disabled={busy || !sharedTarget.current}
+                    onClick={() => run(() => chooseShared(a))}
+                  >
+                    {sharedTarget.current?.replace
+                      ? "替换选中图片"
+                      : "插入文章"}
+                  </button>
+                  <button
+                    disabled={busy || !sharedTarget.current}
+                    onClick={() => run(() => chooseShared(a, true))}
+                  >
+                    设为文章封面
+                  </button>
+                  <button
+                    className="danger"
+                    disabled={busy}
+                    onClick={() => {
+                      if (window.confirm("删除这张共享素材？"))
+                        run(async () => {
+                          await flush();
+                          await api(
+                            `/shared-assets/${a.id}`,
+                            { method: "DELETE" },
+                            2,
+                          );
+                          await sharedList();
+                          if (live.current)
+                            await material(live.current.article_id);
+                        });
+                    }}
+                  >
+                    删除素材
+                  </button>
+                </article>
+              ))}
+            </div>
+            <footer>
+              <button
+                disabled={busy || sharedItems.offset === 0}
+                onClick={() =>
+                  run(() =>
+                    sharedList(
+                      Math.max(0, sharedItems.offset - sharedItems.limit),
+                    ),
+                  )
+                }
+              >
+                上一页
+              </button>
+              <button
+                disabled={
+                  busy ||
+                  sharedItems.offset + sharedItems.limit >= sharedItems.total
+                }
+                onClick={() =>
+                  run(() => sharedList(sharedItems.offset + sharedItems.limit))
+                }
+              >
+                下一页
+              </button>
+              <button disabled={busy} onClick={() => setSharedOpen(false)}>
+                关闭素材库
+              </button>
+            </footer>
+          </section>
+        </div>
       )}
       {creating && (
         <div className="modalback">
