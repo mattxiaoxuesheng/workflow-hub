@@ -325,6 +325,7 @@ export default function Workspace({ api, user, exitRef }) {
   }
   async function upload(file) {
     if (!live.current) return;
+    if (file.size > 10 * 1024 ** 2) throw Error("图片最大10MB");
     const id = live.current.article_id,
       pos = editor.state.selection.from,
       j = job.current;
@@ -923,7 +924,7 @@ export default function Workspace({ api, user, exitRef }) {
               </footer>
               <details>
                 <summary>素材库 · {assets.length} 张</summary>
-                <p>删除正文图片只移除引用。历史版本引用的素材不能永久删除。</p>
+                <p>支持 JPG / PNG，每张最大 10MB。删除正文图片只移除引用。历史版本引用的素材不能永久删除。</p>
                 <label>
                   封面
                   <select

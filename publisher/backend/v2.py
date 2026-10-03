@@ -19,6 +19,8 @@ from .content import read_package
 from .richtext import EMPTY, from_markdown, validate_doc, render_doc, css_for
 from .wechat import WeChatError
 
+IMAGE_UPLOAD_LIMIT = 10 * 1024**2
+
 
 class ArticleInput(BaseModel):
     title: str = Field(min_length=1, max_length=64)
@@ -395,9 +397,9 @@ def install(app, engine, blobs, lock, cfg, current, row, log, asset_map):
 
     @app.post("/api/v2/articles/{aid}/assets")
     async def upload(aid: int, file: UploadFile = File(...), user=Depends(current)):
-        content = await file.read(2_000_001)
-        if len(content) > 2_000_000:
-            raise HTTPException(413, "图片最大2MB")
+        content = await file.read(IMAGE_UPLOAD_LIMIT + 1)
+        if len(content) > IMAGE_UPLOAD_LIMIT:
+            raise HTTPException(413, "图片最大10MB")
         try:
             with Image.open(io.BytesIO(content)) as im:
                 if (

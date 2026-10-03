@@ -32,6 +32,30 @@ def save(c, aid, draft, **changes):
     )
 
 
+def test_image_upload_accepts_ten_mb_and_rejects_larger(env):
+    _, c, *_ = env
+    aid = new(c)
+    buf = io.BytesIO()
+    Image.new("RGB", (2048, 1024), "blue").save(buf, format="PNG", compress_level=0)
+    content = buf.getvalue()
+    assert len(content) > 2_000_000
+    limit = 10 * 1024**2
+    # Valid PNG data with trailing bytes exercises the exact upload size boundary.
+    content += b"\0" * (limit - len(content))
+    accepted = c.post(
+        f"/api/v2/articles/{aid}/assets",
+        files={"file": ("large.png", content, "image/png")},
+    )
+    assert accepted.status_code == 200, accepted.text
+    assert accepted.json()["size"] == limit
+    rejected = c.post(
+        f"/api/v2/articles/{aid}/assets",
+        files={"file": ("oversized.png", content + b"\0", "image/png")},
+    )
+    assert rejected.status_code == 413
+    assert "10MB" in rejected.json()["detail"]
+
+
 def test_draft_conflicts_versions_restore(env):
     app, c, w, *_ = env
     aid = new(c)
