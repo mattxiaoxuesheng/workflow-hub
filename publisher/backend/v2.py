@@ -184,6 +184,7 @@ def install(app, engine, blobs, lock, cfg, current, row, log, asset_map):
                     revision=1,
                     updated_at=time.time(),
                     updated_by="migration",
+                    follow_latest=True,
                     **values,
                 )
             )
@@ -250,6 +251,7 @@ def install(app, engine, blobs, lock, cfg, current, row, log, asset_map):
                     article_id=aid,
                     title=body.title,
                     content_json=json.dumps(EMPTY),
+                    follow_latest=True,
                     template=body.template,
                     revision=1,
                     updated_at=time.time(),
@@ -262,7 +264,68 @@ def install(app, engine, blobs, lock, cfg, current, row, log, asset_map):
     @app.get("/api/v2/articles/{aid}/draft")
     def get_draft(aid: int, user=Depends(current)):
         with lock, engine.begin() as c:
-            return serialize(draft_row(c, aid))
+            d = draft_row(c, aid)
+            latest = (
+                c.execute(
+                    select(db.versions)
+                    .where(db.versions.c.article_id == aid)
+                    .order_by(db.versions.c.number.desc())
+                )
+                .mappings()
+                .first()
+            )
+            if (
+                latest
+                and latest["id"] != d["base_version_id"]
+                and d["base_version_id"]
+                and d["follow_latest"]
+            ):
+                baseline = normalize_version(
+                    c, row(c, db.versions, d["base_version_id"])
+                )
+                old_assets = asset_map(c, baseline["id"])
+                baseline_cover = baseline["cover"]
+                if baseline_cover in old_assets:
+                    a = old_assets[baseline_cover]
+                    baseline_cover = register_asset(c, aid, a["sha256"], a["mime"])
+                clean = (
+                    d["title"] == baseline["title"]
+                    and d["template"] == baseline["template"]
+                    and d["cover"] == baseline_cover
+                    and json.loads(d["content_json"])
+                    == json.loads(baseline["content_json"])
+                )
+                if clean:
+                    latest = normalize_version(c, dict(latest))
+                    amap = asset_map(c, latest["id"])
+                    cover = latest["cover"]
+                    if cover in amap:
+                        a = amap[cover]
+                        cover = register_asset(c, aid, a["sha256"], a["mime"])
+                    values = dict(
+                        title=latest["title"],
+                        template=latest["template"],
+                        cover=cover,
+                        content_json=latest["content_json"],
+                        base_version_id=latest["id"],
+                        revision=d["revision"] + 1,
+                        updated_at=time.time(),
+                        updated_by="version_sync",
+                    )
+                    c.execute(
+                        update(db.drafts)
+                        .where(db.drafts.c.article_id == aid)
+                        .values(**values)
+                    )
+                    d = {**d, **values}
+            return {
+                **serialize(d),
+                "latest_version_id": latest["id"] if latest else None,
+                "latest_version_number": latest["number"] if latest else None,
+                "has_newer_version": bool(
+                    latest and latest["id"] != d["base_version_id"]
+                ),
+            }
 
     @app.put("/api/v2/articles/{aid}/draft")
     def save_draft(aid: int, body: DraftInput, user=Depends(current)):
@@ -341,6 +404,7 @@ def install(app, engine, blobs, lock, cfg, current, row, log, asset_map):
                 .where(db.drafts.c.article_id == aid)
                 .values(
                     base_version_id=vid,
+                    follow_latest=True,
                     revision=d["revision"] + 1,
                     updated_at=time.time(),
                 )
@@ -377,6 +441,13 @@ def install(app, engine, blobs, lock, cfg, current, row, log, asset_map):
             rewrite(doc)
             values = dict(
                 base_version_id=vid,
+                follow_latest=vid
+                == c.execute(
+                    select(db.versions.c.id)
+                    .where(db.versions.c.article_id == aid)
+                    .order_by(db.versions.c.number.desc())
+                    .limit(1)
+                ).scalar_one(),
                 title=v["title"],
                 content_json=json.dumps(doc, ensure_ascii=False),
                 template=v["template"],
@@ -571,6 +642,7 @@ def install(app, engine, blobs, lock, cfg, current, row, log, asset_map):
                     article_id=aid,
                     title=manifest["title"],
                     template="clean",
+                    follow_latest=True,
                     content_json=json.dumps(doc, ensure_ascii=False),
                     cover=mapping[cover],
                     revision=1,

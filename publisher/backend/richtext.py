@@ -213,7 +213,7 @@ def validate_doc(doc, assets):
             ):
                 raise ValueError("不支持的文本属性")
             allowed = {
-                "link": {"href", "target", "rel", "class"},
+                "link": {"href", "target", "rel", "class", "title"},
                 "textStyle": {
                     "color",
                     "backgroundColor",
@@ -227,6 +227,10 @@ def validate_doc(doc, assets):
                 raise ValueError("不支持的文本属性")
             if m == "link":
                 safe_link(a.get("href"))
+                if a.get("title") is not None and (
+                    not isinstance(a["title"], str) or len(a["title"]) > 500
+                ):
+                    raise ValueError("链接标题须为不超过500字的文本")
             if m == "textStyle":
                 if a.get("fontFamily") or a.get("lineHeight"):
                     raise ValueError("不支持自定义字体或行高")
@@ -273,7 +277,8 @@ def render_doc(
                 if typ in MARKS:
                     text = f"<{MARKS[typ]}>{text}</{MARKS[typ]}>"
                 elif typ == "link":
-                    text = f'<a href="{esc(safe_link(ma["href"]))}">{text}</a>'
+                    title = f' title="{esc(ma["title"])}"' if ma.get("title") else ""
+                    text = f'<a href="{esc(safe_link(ma["href"]))}"{title}>{text}</a>'
                 else:
                     style = (
                         styles({"backgroundColor": ma.get("color")})
@@ -377,7 +382,15 @@ def from_markdown(markdown, mapping=None):
         if el.name == "a":
             try:
                 safe_link(el.get("href"))
-                extra = [{"type": "link", "attrs": {"href": el["href"]}}]
+                extra = [
+                    {
+                        "type": "link",
+                        "attrs": {
+                            "href": el["href"],
+                            **({"title": el["title"]} if el.get("title") else {}),
+                        },
+                    }
+                ]
             except ValueError:
                 extra = []
         else:
@@ -401,7 +414,11 @@ def from_markdown(markdown, mapping=None):
             return [
                 {
                     "type": "codeBlock",
-                    **({"content": [{"type": "text", "text": el.get_text()}]} if el.get_text() else {}),
+                    **(
+                        {"content": [{"type": "text", "text": el.get_text()}]}
+                        if el.get_text()
+                        else {}
+                    ),
                 }
             ]
         if typ in ("listItem", "tableCell", "tableHeader"):
