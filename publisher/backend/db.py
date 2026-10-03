@@ -96,6 +96,7 @@ publications = Table(
     Column("html_sent", Text),
     Column("cover_media_id", String),
     Column("html_hash", String),
+    Column("prepared_images", Text),
     Column("html_returned", Text),
     Column("result", Text),
     Column("created_at", Float),
@@ -159,6 +160,7 @@ def open_db(path):
             "wechat_publications": {
                 "cover_media_id": "VARCHAR",
                 "html_hash": "VARCHAR",
+                "prepared_images": "TEXT",
             },
         }
         for table, fields in additions.items():

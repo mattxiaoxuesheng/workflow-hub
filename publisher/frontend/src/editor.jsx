@@ -91,6 +91,63 @@ const ArticleImage = Image.extend({
     ];
   },
 });
+const imageUrl = (url) => import.meta.env.BASE_URL + url.replace(/^\//, "");
+const imageSize = (bytes) =>
+  bytes >= 1024 ** 2
+    ? `${(bytes / 1024 ** 2).toFixed(2)} MB`
+    : `${Math.ceil(bytes / 1024)} KB`;
+function ImageComparison({ images }) {
+  return (
+    <details className="image-comparison">
+      <summary>查看微信图片副本 / 原图对比</summary>
+      <p>
+        原图保留。点击图片可打开大图检查文字和细节；下面的副本将用于发送微信。
+      </p>
+      {images.map((info) => (
+        <section key={info.url}>
+          <h4>
+            {info.role === "cover" ? "封面副本" : "正文副本"} ·{" "}
+            {info.mime === "image/png" ? "PNG" : "JPG"}
+          </h4>
+          <p>
+            {info.original_width} × {info.original_height} ·{" "}
+            {imageSize(info.original_size)} → {info.width} × {info.height} ·{" "}
+            {imageSize(info.size)} · 已满足大小限制
+          </p>
+          {info.transparency_flattened && (
+            <p>透明背景已转换为白色，请检查显示效果。</p>
+          )}
+          <div className="image-comparison-grid">
+            <a
+              href={imageUrl(info.original_url)}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              <img
+                src={imageUrl(info.original_url)}
+                alt="原图"
+                loading="lazy"
+              />
+              原图
+            </a>
+            <a
+              href={imageUrl(info.url)}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              <img
+                src={imageUrl(info.url)}
+                alt={info.role === "cover" ? "微信封面副本" : "微信正文副本"}
+                loading="lazy"
+              />
+              微信副本（点击放大）
+            </a>
+          </div>
+        </section>
+      ))}
+    </details>
+  );
+}
 export default function Workspace({ api, user, exitRef }) {
   const [items, setItems] = useState([]),
     [aid, setAid] = useState(null),
@@ -893,7 +950,7 @@ export default function Workspace({ api, user, exitRef }) {
                 ref={input}
                 hidden
                 type="file"
-                accept="image/png,image/jpeg"
+                accept="image/png,image/jpeg,image/webp"
                 onChange={(e) => {
                   const f = e.target.files[0];
                   if (f) run(() => upload(f));
@@ -924,7 +981,10 @@ export default function Workspace({ api, user, exitRef }) {
               </footer>
               <details>
                 <summary>素材库 · {assets.length} 张</summary>
-                <p>支持 JPG / PNG，每张最大 10MB。删除正文图片只移除引用。历史版本引用的素材不能永久删除。</p>
+                <p>
+                  支持 JPG / PNG / WebP，每张最大
+                  10MB。自动生成微信图片副本，原图保留。删除正文图片只移除引用。历史版本引用的素材不能永久删除。
+                </p>
                 <label>
                   封面
                   <select
@@ -948,6 +1008,16 @@ export default function Workspace({ api, user, exitRef }) {
                         src={`${base}/articles/${aid}/assets/${a.path}`}
                         alt="素材"
                       />
+                      {a.publication_images && (
+                        <ImageComparison
+                          images={Object.values(a.publication_images).map(
+                            (info) => ({
+                              ...info,
+                              original_url: `/api/v2/articles/${aid}/assets/${a.path}`,
+                            }),
+                          )}
+                        />
+                      )}
                       <button
                         className="secondary"
                         onClick={() =>
@@ -1054,6 +1124,12 @@ export default function Workspace({ api, user, exitRef }) {
                 sandbox="allow-same-origin"
                 srcDoc={frame(preview.html)}
               />
+              {preview.compression_notice && (
+                <p>{preview.compression_notice}</p>
+              )}
+              {!!preview.images?.length && (
+                <ImageComparison images={preview.images} />
+              )}
               <footer>
                 <button className="secondary" onClick={() => setTab("edit")}>
                   返回修改

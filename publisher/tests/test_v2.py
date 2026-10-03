@@ -2,7 +2,7 @@ from publisher.tests.test_workflow import env as env
 import io
 import sqlite3
 from PIL import Image
-from sqlalchemy import select
+from sqlalchemy import select, update
 from publisher.backend import db
 
 DOC = {
@@ -54,6 +54,58 @@ def test_image_upload_accepts_ten_mb_and_rejects_larger(env):
     )
     assert rejected.status_code == 413
     assert "10MB" in rejected.json()["detail"]
+
+
+def test_upload_compressed_copies_preview_and_send_same_bytes(env):
+    _, c, w, *_ = env
+    aid = new(c)
+    buf = io.BytesIO()
+    Image.effect_noise((1800, 1600), 100).convert("RGB").save(buf, format="WEBP", lossless=True)
+    original = buf.getvalue()
+    uploaded = c.post(f"/api/v2/articles/{aid}/assets", files={"file": ("photo.webp", original, "image/webp")})
+    assert uploaded.status_code == 200, uploaded.text
+    a = uploaded.json()
+    assert c.get(f"/api/v2/articles/{aid}/assets/{a['path']}").content == original
+    for role, maximum in (("body", 1_000_000), ("cover", 2_000_000)):
+        copy = a["publication_images"][role]
+        r = c.get(copy["url"])
+        assert r.status_code == 200 and len(r.content) == copy["size"] <= maximum
+        with Image.open(io.BytesIO(r.content)) as im:
+            assert im.format in ("JPEG", "PNG")
+    d = c.get(f"/api/v2/articles/{aid}/draft").json()
+    d = save(c, aid, d, cover=a["path"], content_json={"type":"doc", "content":[{"type":"image", "attrs":{"src":a["path"]}}]}).json()
+    vid = c.post(f"/api/v2/articles/{aid}/versions", json={"revision":d["revision"]}).json()["version_id"]
+    captured = []
+    upload = w.upload
+    def record(data, filename, mime, cover=False):
+        captured.append((data, mime, cover))
+        return upload(data, filename, mime, cover)
+    w.upload = record
+    p = c.post(f"/api/v2/versions/{vid}/prepare")
+    assert p.status_code == 200, p.text
+    p = p.json()
+    assert len(p["images"]) == 2
+    for info, (data, mime, cover) in zip(p["images"], captured):
+        r = c.get(info["url"])
+        assert r.content == data and r.headers["content-type"] == mime
+        assert (info["role"] == "cover") == cover
+    cached = c.post(f"/api/v2/versions/{vid}/prepare").json()
+    assert cached == p and len(captured) == 2
+    sent = c.post(f"/api/v2/versions/{vid}/send", json={"html_hash":p["html_hash"]})
+    assert sent.status_code == 200 and len(captured) == 2
+
+
+def test_legacy_prepared_preview_does_not_claim_new_compressed_images(env):
+    app, c, w, ingest, *_ = env
+    vid = ingest().json()["version_id"]
+    p = c.post(f"/api/v2/versions/{vid}/prepare").json()
+    calls = len(w.calls)
+    with app.state.engine.begin() as conn:
+        conn.execute(update(db.publications).where(db.publications.c.version_id == vid).values(prepared_images=None))
+    old = c.post(f"/api/v2/versions/{vid}/prepare").json()
+    assert old["html"] == p["html"] and old["html_hash"] == p["html_hash"]
+    assert old["images"] == [] and "保存新版本" in old["compression_notice"]
+    assert len(w.calls) == calls
 
 
 def test_draft_conflicts_versions_restore(env):

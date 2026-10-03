@@ -86,7 +86,7 @@ test("image caption, final confirmation and WeChat returned preview", async ({
   await editor.click();
   await page.keyboard.type("Image article");
   await page
-    .locator('input[type=file][accept="image/png,image/jpeg"]')
+    .locator('input[type=file][accept="image/png,image/jpeg,image/webp"]')
     .setInputFiles(
       path.resolve("../../inputs/wechat/acceptance/images/portrait.png"),
     );
@@ -103,6 +103,21 @@ test("image caption, final confirmation and WeChat returned preview", async ({
   await expect(
     page.getByRole("button", { name: "确认发送微信草稿" }),
   ).toBeVisible();
+  const preview = page
+    .locator("section.empty")
+    .filter({ has: page.getByRole("heading", { name: /微信发送预览/ }) });
+  await preview
+    .getByText("查看微信图片副本 / 原图对比", { exact: true })
+    .click();
+  const copies = preview.getByAltText(/微信正文副本|微信封面副本/);
+  await expect(copies).toHaveCount(2);
+  for (const copy of await copies.all()) {
+    await expect(copy).toBeVisible();
+    await expect
+      .poll(() => copy.evaluate((img) => img.naturalWidth))
+      .toBeGreaterThan(0);
+  }
+  await expect(preview.getByText(/已满足大小限制/)).toHaveCount(2);
   await page.getByRole("button", { name: "确认发送微信草稿" }).click();
   await page.getByRole("button", { name: "取回微信草稿" }).click();
   await expect(
