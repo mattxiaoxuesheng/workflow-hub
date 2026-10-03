@@ -1,5 +1,7 @@
 # 腾讯云运行记录
 
+> 下文为 V1 历史部署记录。V2 使用服务器拉取镜像，当前操作说明见 [PUBLISHER-IMAGE-DEPLOYMENT.md](PUBLISHER-IMAGE-DEPLOYMENT.md)。不要继续使用下文的 `--build` 命令部署 V2。
+
 2026-09-09 已部署到现有 StockLab 服务器，入口为 https://stocklab.hardway.top/publisher/ 。
 
 - 源码：`/opt/wechat-publisher/source`

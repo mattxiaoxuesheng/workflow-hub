@@ -22,6 +22,8 @@ from . import db
 from .content import read_package, image_refs, asset_path
 from .render import render, templates, TEMPLATE_DIR
 from .wechat import WeChat, WeChatError
+from .richtext import render_doc
+from .v2 import install
 
 ROOT = Path(__file__).resolve().parents[1]
 password_hasher = PasswordHasher()
@@ -209,7 +211,13 @@ def create_app(data_dir=None, testing=False, wechat=None):
             result = []
             for a in c.execute(select(db.articles).order_by(db.articles.c.updated_at.desc())).mappings():
                 versions = [dict(v) for v in c.execute(select(db.versions.c.id, db.versions.c.number, db.versions.c.template, db.versions.c.title).where(db.versions.c.article_id == a['id']).order_by(db.versions.c.number.desc())).mappings()]
-                result.append({**dict(a), 'versions': versions})
+                d = c.execute(select(db.drafts).where(db.drafts.c.article_id == a['id'])).mappings().first()
+                draft_summary = None
+                if d:
+                    baseline = c.execute(select(db.versions).where(db.versions.c.id == d['base_version_id'])).mappings().first() if d['base_version_id'] else None
+                    changed = not baseline or any(d[k] != baseline[k] for k in ('title', 'template', 'cover')) or json.loads(d['content_json']) != json.loads(baseline['content_json'] or '{}')
+                    draft_summary = {'revision': d['revision'], 'updated_at': d['updated_at'], 'base_version_id': d['base_version_id'], 'has_changes': bool(changed)}
+                result.append({**dict(a), 'versions': versions, 'working_draft': draft_summary})
             return result
 
     @app.get('/api/v1/templates')
@@ -219,8 +227,10 @@ def create_app(data_dir=None, testing=False, wechat=None):
     def version(vid: int, user=Depends(current)):
         with engine.begin() as c:
             v = row(c, db.versions, vid)
+            v = normalize_version(c, v)
+            v['content_json'] = json.loads(v['content_json'])
             v['assets'] = list(asset_map(c, vid))
-            v['preview_html'] = render(v['markdown'], v['template'], v['assets'], vid, template_css=v['template_css'])
+            v['preview_html'] = v['rendered_html'] or render_doc(v['content_json'], v['template'], asset_map(c,vid), version_id=vid, template_css=v['template_css'])
             p = c.execute(select(db.publications).where(db.publications.c.version_id == vid)).mappings().first()
             v['publication'] = dict(p) if p else None
             return v
@@ -272,6 +282,7 @@ def create_app(data_dir=None, testing=False, wechat=None):
         if not cfg['wechat']['enable_draft']: raise HTTPException(403, '草稿功能已关闭')
         with lock, engine.begin() as c:
             v = row(c, db.versions, vid); amap = asset_map(c, vid)
+            if not v['markdown']: raise HTTPException(409, '请通过最终预览确认发送此富文本版本')
             prior = c.execute(select(db.publications).where(db.publications.c.version_id == vid)).mappings().first()
             if prior: raise HTTPException(409, '此版本已处理；请查询草稿或创建新版本。结果不确定时先核对微信后台')
             pid = c.execute(insert(db.publications).values(version_id=vid, status='drafting', created_at=time.time(), updated_at=time.time())).inserted_primary_key[0]
@@ -392,6 +403,8 @@ def create_app(data_dir=None, testing=False, wechat=None):
             c.execute(update(db.tokens).where(db.tokens.c.id==tid).values(revoked_at=time.time()))
             log(c,user['username'],'token_revoked',tid)
         return {'ok':True}
+
+    normalize_version = install(app, engine, blobs, lock, cfg, current, row, log, asset_map)
 
     dist=ROOT/'frontend/dist'
     if dist.exists():

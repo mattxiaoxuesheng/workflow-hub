@@ -1,11 +1,7 @@
 services:
   publisher:
-    build:
-      context: ..
-      dockerfile: publisher/Dockerfile
-      args:
-        PUBLISHER_BASE_PATH: /publisher/
-        PIP_INDEX_URL: https://mirrors.cloud.tencent.com/pypi/simple
+    image: ${PUBLISHER_IMAGE:?Set PUBLISHER_IMAGE to a digest-pinned registry image}
+    pull_policy: always
     restart: unless-stopped
     environment:
       PUBLISHER_BASE_PATH: /publisher
@@ -17,8 +13,6 @@ services:
       - /opt/wechat-publisher/secrets/publisher.env
     volumes:
       - /opt/wechat-publisher/data:/app/data
-      - ../publisher/config:/app/publisher/config:ro
-      - ../publisher/templates:/app/publisher/templates:ro
     read_only: true
     tmpfs:
       - /tmp:size=128m,mode=1777

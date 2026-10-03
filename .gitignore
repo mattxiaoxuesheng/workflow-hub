@@ -13,3 +13,6 @@ publisher/data/
 publisher/frontend/node_modules/
 publisher/frontend/dist/
 .pytest_cache/
+
+publisher/frontend/test-results/
+publisher/frontend/playwright-report/
