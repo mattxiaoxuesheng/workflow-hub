@@ -210,12 +210,18 @@ def create_app(data_dir=None, testing=False, wechat=None):
         with engine.begin() as c:
             result = []
             for a in c.execute(select(db.articles).order_by(db.articles.c.updated_at.desc())).mappings():
-                versions = [dict(v) for v in c.execute(select(db.versions.c.id, db.versions.c.number, db.versions.c.template, db.versions.c.title).where(db.versions.c.article_id == a['id']).order_by(db.versions.c.number.desc())).mappings()]
+                versions = [dict(v) for v in c.execute(select(db.versions.c.id, db.versions.c.number, db.versions.c.template, db.versions.c.title, db.versions.c.git_commit, db.versions.c.created_at).where(db.versions.c.article_id == a['id']).order_by(db.versions.c.number.desc())).mappings()]
                 d = c.execute(select(db.drafts).where(db.drafts.c.article_id == a['id'])).mappings().first()
                 draft_summary = None
                 if d:
                     baseline = c.execute(select(db.versions).where(db.versions.c.id == d['base_version_id'])).mappings().first() if d['base_version_id'] else None
-                    changed = not baseline or any(d[k] != baseline[k] for k in ('title', 'template', 'cover')) or json.loads(d['content_json']) != json.loads(baseline['content_json'] or '{}')
+                    baseline_cover = baseline['cover'] if baseline else None
+                    if baseline and baseline_cover != d['cover']:
+                        cover_asset = asset_map(c, baseline['id']).get(baseline_cover)
+                        if cover_asset:
+                            suffix = {'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp'}[cover_asset['mime']]
+                            baseline_cover = f"uploads/{cover_asset['sha256']}.{suffix}"
+                    changed = not baseline or any(d[k] != baseline[k] for k in ('title', 'template')) or d['cover'] != baseline_cover or json.loads(d['content_json']) != json.loads(baseline['content_json'] or '{}')
                     draft_summary = {'revision': d['revision'], 'updated_at': d['updated_at'], 'base_version_id': d['base_version_id'], 'has_changes': bool(changed)}
                 result.append({**dict(a), 'versions': versions, 'working_draft': draft_summary})
             return result

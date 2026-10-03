@@ -6,6 +6,7 @@ from sqlalchemy import (
     Table,
     Column,
     Integer,
+    Boolean,
     String,
     Text,
     Float,
@@ -118,6 +119,7 @@ drafts = Table(
     metadata,
     Column("article_id", ForeignKey("articles.id"), primary_key=True),
     Column("base_version_id", ForeignKey("article_versions.id")),
+    Column("follow_latest", Boolean, nullable=False, server_default="1"),
     Column("title", String),
     Column("content_json", Text),
     Column("template", String),
@@ -168,6 +170,8 @@ def open_db(path):
     with engine.begin() as c:
         c.exec_driver_sql("INSERT OR IGNORE INTO schema_version(version) VALUES(1)")
         additions = {
+            # Existing drafts may be deliberate historical restores; preserve them.
+            "working_drafts": {"follow_latest": "BOOLEAN NOT NULL DEFAULT 0"},
             "article_versions": {"content_json": "TEXT", "rendered_html": "TEXT"},
             "wechat_publications": {
                 "cover_media_id": "VARCHAR",

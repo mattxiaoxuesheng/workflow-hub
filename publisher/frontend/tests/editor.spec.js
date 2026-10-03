@@ -23,6 +23,13 @@ async function saved(page) {
     page.getByRole("status").filter({ hasText: /^已保存 / }),
   ).toBeVisible();
 }
+async function selectArticle(page, title) {
+  const options = page.getByLabel("文章", { exact: true }).locator("option");
+  const option = options.filter({ hasText: title + " · #" }).first();
+  await page
+    .getByLabel("文章", { exact: true })
+    .selectOption(await option.getAttribute("value"));
+}
 test("autosave, immutable history, override reset and mobile layout", async ({
   page,
 }) => {
@@ -35,9 +42,7 @@ test("autosave, immutable history, override reset and mobile layout", async ({
   await page.getByRole("button", { name: "保存为 V1", exact: true }).click();
   await expect(page.getByText("已保存为 V1", { exact: true })).toBeVisible();
   await page.reload();
-  await page
-    .getByLabel("文章", { exact: true })
-    .selectOption({ label: "Browser acceptance" });
+  await selectArticle(page, "Browser acceptance");
   await expect(editor).toContainText("Hello browser");
   await page.locator(".more-tools summary").click();
   await editor.click();
@@ -68,6 +73,22 @@ test("autosave, immutable history, override reset and mobile layout", async ({
   await page.getByRole("button", { name: /V1 · Browser acceptance/ }).click();
   await page.getByRole("button", { name: "恢复为工作稿", exact: true }).click();
   await expect(editor).toHaveText("Hello browser");
+  await page.getByRole("button", { name: "返回首页", exact: true }).click();
+  await selectArticle(page, "Browser acceptance");
+  await expect(editor).toHaveText("Hello browser");
+  await expect(page.getByLabel("模板", { exact: true })).toHaveValue("clean");
+  await page.route("**/api/v2/articles/*/restore/*", async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 2600));
+    await route.continue();
+  });
+  await page.getByRole("button", { name: "载入最新版本", exact: true }).click();
+  await expect(editor).toHaveAttribute("contenteditable", "false");
+  await expect(page.getByLabel("文章标题", { exact: true })).toBeDisabled();
+  await expect(page.getByText("已载入最新版本 V2", { exact: true })).toBeVisible();
+  await expect(editor).toHaveAttribute("contenteditable", "true");
+  await expect(page.getByLabel("模板", { exact: true })).toHaveValue("tech");
+  await saved(page);
+  await expect(page.getByRole("alert")).toHaveCount(0);
   await page.setViewportSize({ width: 390, height: 844 });
   expect(
     await page.evaluate(
@@ -134,16 +155,14 @@ test("shared library uploads independently, reuses images and replaces safely", 
   await login(page);
   await page.getByRole("button", { name: "共享素材库", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "共享素材库" });
-  await dialog
-    .getByLabel("上传共享素材")
-    .setInputFiles({
-      name: "Unused-purple.png",
-      mimeType: "image/png",
-      buffer: Buffer.from(
-        "iVBORw0KGgoAAAANSUhEUgAAAAcAAAAHCAIAAABLMMCEAAAAFElEQVR4nGNsYGhgwABMmEJ0FwUAnNABDvaeFeUAAAAASUVORK5CYII=",
-        "base64",
-      ),
-    });
+  await dialog.getByLabel("上传共享素材").setInputFiles({
+    name: "Unused-purple.png",
+    mimeType: "image/png",
+    buffer: Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAcAAAAHCAIAAABLMMCEAAAAFElEQVR4nGNsYGhgwABMmEJ0FwUAnNABDvaeFeUAAAAASUVORK5CYII=",
+      "base64",
+    ),
+  });
   const unused = dialog
     .locator("article")
     .filter({ has: page.getByAltText("Unused-purple.png", { exact: true }) });
@@ -187,9 +206,7 @@ test("shared library uploads independently, reuses images and replaces safely", 
   await expect(image).toBeVisible();
   await saved(page);
   const secondSrc = await image.getAttribute("src");
-  await page
-    .getByLabel("文章", { exact: true })
-    .selectOption({ label: "Shared first" });
+  await selectArticle(page, "Shared first");
   await expect(page.locator(".tiptap figcaption")).toHaveText(
     "Keep shared caption",
   );
@@ -212,9 +229,7 @@ test("shared library uploads independently, reuses images and replaces safely", 
     "Keep shared caption",
   );
   await saved(page);
-  await page
-    .getByLabel("文章", { exact: true })
-    .selectOption({ label: "Shared second" });
+  await selectArticle(page, "Shared second");
   await expect(image).toHaveAttribute("src", secondSrc);
   await page.getByRole("button", { name: "共享素材库", exact: true }).click();
   const used = dialog
@@ -224,6 +239,92 @@ test("shared library uploads independently, reuses images and replaces safely", 
   await used.getByRole("button", { name: "删除素材", exact: true }).click();
   await expect(dialog.getByRole("alert")).toContainText("仍引用");
   await dialog.getByRole("button", { name: "关闭素材库" }).click();
+});
+
+test("history stays accessible after save failure and home preserves pending edits", async ({
+  page,
+}) => {
+  await login(page);
+  await create(page, "History failure regression");
+  const editor = page.locator(".tiptap");
+  await editor.click();
+  await page.keyboard.type("Stored version text");
+  await saved(page);
+  await page.getByRole("button", { name: "保存为 V1", exact: true }).click();
+  await expect(page.getByText("已保存为 V1", { exact: true })).toBeVisible();
+  await page.route("**/api/v2/articles/*/draft", (route) =>
+    route.request().method() === "PUT"
+      ? route.fulfill({
+          status: 422,
+          contentType: "application/json",
+          body: JSON.stringify({ detail: "不支持的文本属性" }),
+        })
+      : route.continue(),
+  );
+  await editor.click();
+  await page.keyboard.press("End");
+  await page.keyboard.type(" Pending local text");
+  await expect(page.getByRole("alert")).toContainText("未保存");
+  await page.getByRole("button", { name: "历史版本", exact: true }).click();
+  await expect(
+    page.frameLocator('iframe[title="历史版本只读预览"]').locator("body"),
+  ).toContainText("Stored version text");
+  await page.getByRole("button", { name: "返回首页", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "文章首页", exact: true }),
+  ).toBeVisible();
+  await page
+    .locator("button.articlecard")
+    .filter({ hasText: "History failure regression" })
+    .click();
+  await expect(editor).toContainText("Pending local text");
+  await page.unroute("**/api/v2/articles/*/draft");
+  await page.getByRole("button", { name: "保存修改", exact: true }).click();
+  await saved(page);
+});
+
+test("home distinguishes articles with the same title and empty history explains versions", async ({
+  page,
+}) => {
+  await login(page);
+  await create(page, "Repeated title");
+  await page.getByRole("button", { name: "历史版本", exact: true }).click();
+  await expect(page.getByText("暂无历史版本", { exact: false })).toBeVisible();
+  await page.getByRole("button", { name: "返回首页", exact: true }).click();
+  await create(page, "Repeated title");
+  await page.getByRole("button", { name: "返回首页", exact: true }).click();
+  const cards = page
+    .locator("button.articlecard")
+    .filter({ hasText: "Repeated title" });
+  await expect(cards).toHaveCount(2);
+  const a = await cards.nth(0).textContent(),
+    b = await cards.nth(1).textContent();
+  expect(a).not.toEqual(b);
+  await cards.nth(1).click();
+  await page.getByLabel("文章", { exact: true }).selectOption("");
+  await expect(
+    page.getByRole("heading", { name: "文章首页", exact: true }),
+  ).toBeVisible();
+});
+
+test("links with native editor attributes autosave and history loads latest", async ({
+  page,
+}) => {
+  await login(page);
+  await create(page, "Link title regression");
+  const editor = page.locator(".tiptap");
+  await editor.click();
+  await page.keyboard.type("Visit https://example.com docs ");
+  await expect(editor.locator('a[href="https://example.com"]')).toBeVisible();
+  await saved(page);
+  await page.getByRole("button", { name: "保存为 V1", exact: true }).click();
+  await expect(page.getByText("已保存为 V1", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "历史版本", exact: true }).click();
+  await expect(
+    page
+      .frameLocator('iframe[title="历史版本只读预览"]')
+      .locator('a[href="https://example.com"]'),
+  ).toBeVisible();
 });
 
 test("conflict reload synchronizes the visible document", async ({ page }) => {
@@ -289,18 +390,14 @@ test("navigation pauses editing while the next draft loads", async ({
   await expect(page.locator(".tiptap")).toHaveText("Second draft");
   await saved(page);
   await page.unroute("**/api/v2/articles/*/draft");
-  await page
-    .getByLabel("文章", { exact: true })
-    .selectOption({ label: "Navigation first" });
+  await selectArticle(page, "Navigation first");
   await expect(page.locator(".tiptap")).toHaveText("Keep first draft");
   await page.route("**/api/v2/articles/*/draft", async (route) => {
     if (route.request().method() === "GET")
       await new Promise((r) => setTimeout(r, 1200));
     await route.continue();
   });
-  await page
-    .getByLabel("文章", { exact: true })
-    .selectOption({ label: "Navigation second" });
+  await selectArticle(page, "Navigation second");
   await expect(page.locator(".tiptap")).toHaveAttribute(
     "contenteditable",
     "false",
@@ -310,9 +407,7 @@ test("navigation pauses editing while the next draft loads", async ({
   ).toBeDisabled();
   await expect(page.locator(".tiptap")).toHaveText("Second draft");
   await page.unroute("**/api/v2/articles/*/draft");
-  await page
-    .getByLabel("文章", { exact: true })
-    .selectOption({ label: "Navigation first" });
+  await selectArticle(page, "Navigation first");
   await expect(page.locator(".tiptap")).toHaveText("Keep first draft");
 });
 

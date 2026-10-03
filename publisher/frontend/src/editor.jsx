@@ -151,6 +151,7 @@ function ImageComparison({ images }) {
 export default function Workspace({ api, user, exitRef }) {
   const [items, setItems] = useState([]),
     [aid, setAid] = useState(null),
+    [home, setHome] = useState(true),
     [themes, setThemes] = useState([]),
     [draft, setDraft] = useState(null),
     [version, setVersion] = useState(null),
@@ -201,7 +202,7 @@ export default function Workspace({ api, user, exitRef }) {
   }
   async function openShared(replace = false) {
     sharedTarget.current =
-      draft && tab === "edit" && editor && !navigating
+      draft && !home && tab === "edit" && editor && !navigating
         ? {
             aid: draft.article_id,
             pos: editor.state.selection.from,
@@ -317,10 +318,22 @@ export default function Workspace({ api, user, exitRef }) {
     });
   }, []);
   useEffect(() => {
-    if (!dirty || conflict.current) return;
+    const update = () => {
+      if (document.visibilityState === "visible" && !busy && !navigating)
+        refresh().catch(() => {});
+    };
+    const timer = setInterval(update, 30000);
+    window.addEventListener("focus", update);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener("focus", update);
+    };
+  }, [busy, navigating]);
+  useEffect(() => {
+    if (!dirty || conflict.current || navigating) return;
     const t = setTimeout(() => flush().catch(() => {}), 2000);
     return () => clearTimeout(t);
-  }, [draft, saved]);
+  }, [draft, saved, navigating]);
   useEffect(() => {
     const warn = (e) => {
       if (dirty) {
@@ -389,9 +402,29 @@ export default function Workspace({ api, user, exitRef }) {
     [aid],
   );
   useEffect(() => {
-    editor?.setEditable(!navigating && !sharedOpen);
-  }, [editor, navigating, sharedOpen]);
+    editor?.setEditable(!navigating && !sharedOpen && !home);
+  }, [editor, navigating, sharedOpen, home]);
+  async function goHome() {
+    try {
+      await flush();
+    } catch (e) {
+      setError("工作稿尚未保存，修改已保留在当前页面：" + e.message);
+    }
+    setHome(true);
+    setVersion(null);
+    setPreview(null);
+    await refresh();
+  }
   async function open(id) {
+    if (
+      home &&
+      live.current?.article_id === id &&
+      (stamp(live.current) !== ack.current || conflict.current)
+    ) {
+      setHome(false);
+      setTab("edit");
+      return;
+    }
     setNavigating(true);
     editor?.setEditable(false);
     try {
@@ -404,6 +437,7 @@ export default function Workspace({ api, user, exitRef }) {
         live.current = d;
         setDraft(d);
         setAid(id);
+        setHome(false);
         if (
           editor?.options.extensions.find((x) => x.name === "image")?.options
             .articleId === id
@@ -505,6 +539,43 @@ export default function Workspace({ api, user, exitRef }) {
     await api(`/versions/${version.id}${path}`, { method: "POST" });
     await pickVersion(version.id);
     setTab("wechat");
+  }
+  async function loadLatest() {
+    const latest = article?.versions[0];
+    if (!latest) return;
+    if (
+      (dirty || article.working_draft?.has_changes) &&
+      !window.confirm("载入最新版本会替换当前工作稿的修改，是否继续？")
+    )
+      return;
+    const targetEditor = editor;
+    setNavigating(true);
+    targetEditor?.setEditable(false);
+    try {
+      await enqueue(async () => {
+        const d = await api(
+          `/articles/${aid}/restore/${latest.id}`,
+          { method: "POST", body: { revision: live.current.revision } },
+          2,
+        );
+        setDraft(d);
+        live.current = d;
+        ack.current = stamp(d);
+        setSaved(ack.current);
+        conflict.current = false;
+        targetEditor.commands.setContent(d.content_json, { emitUpdate: false });
+        setVersion(null);
+        setPreview(null);
+        setTab("edit");
+        await material();
+        await refresh();
+        setNotice(`已载入最新版本 V${latest.number}`);
+      });
+    } finally {
+      setNavigating(false);
+      if (!targetEditor?.isDestroyed)
+        targetEditor?.setEditable(!home && !sharedOpen);
+    }
   }
   const image = editor?.isActive("image"),
     block = image
@@ -613,6 +684,11 @@ export default function Workspace({ api, user, exitRef }) {
         </div>
       )}
       <section className="articlebar">
+        {!home && draft && (
+          <button disabled={busy || navigating} onClick={() => run(goHome)}>
+            返回首页
+          </button>
+        )}
         <button
           disabled={busy || navigating}
           onClick={() => run(() => openShared())}
@@ -665,17 +741,21 @@ export default function Workspace({ api, user, exitRef }) {
           文章
           <select
             aria-label="文章"
-            value={aid || ""}
+            value={home ? "" : aid || ""}
             disabled={busy || saving || sharedOpen}
             onChange={(e) => {
               const id = Number(e.target.value);
               if (id) run(() => open(id));
+              else run(goHome);
             }}
           >
-            <option value="">选择文章</option>
+            <option value="">首页 / 选择文章</option>
             {items.map((x) => (
               <option key={x.id} value={x.id}>
-                {x.title}
+                {x.title} · #{x.id} ·{" "}
+                {x.versions.length
+                  ? `V${x.versions[0].number}（${x.versions.length} 个版本）`
+                  : "工作稿"}
               </option>
             ))}
           </select>
@@ -684,16 +764,24 @@ export default function Workspace({ api, user, exitRef }) {
           刷新列表
         </button>
       </section>
-      {!draft ? (
+      {home || !draft ? (
         <section className="empty">
-          <h2>直接开始写作，或导入已有文章</h2>
+          <h2>文章首页</h2>
+          <p>
+            选择文章继续编辑，或新建、导入文章。同一 GitHub
+            文章目录的多次导入显示为历史版本。
+          </p>
           {items.map((x) => (
             <button
               className="articlecard"
               key={x.id}
+              disabled={busy || navigating}
               onClick={() => run(() => open(x.id))}
             >
               <strong>{x.title}</strong>
+              <span>
+                #{x.id} · {x.slug} · {x.versions.length} 个历史版本
+              </span>
               <span>
                 {x.versions.length ? "V" + x.versions[0].number : "工作稿"}
                 {x.working_draft?.has_changes ? " · 工作稿有修改" : ""} ·{" "}
@@ -716,14 +804,15 @@ export default function Workspace({ api, user, exitRef }) {
                 disabled={busy}
                 onClick={() =>
                   run(async () => {
-                    await flush();
                     setTab(key);
-                    if (
-                      key === "wechat" &&
-                      !version &&
-                      article?.versions.length
-                    )
-                      await pickVersion(article.versions[0].id);
+                    if (key !== "edit") {
+                      const articles = await api("/articles");
+                      setItems(articles);
+                      const latest = articles.find((x) => x.id === aid)
+                        ?.versions[0];
+                      if (latest) await pickVersion(latest.id);
+                      else setVersion(null);
+                    }
                   })
                 }
               >
@@ -731,6 +820,19 @@ export default function Workspace({ api, user, exitRef }) {
               </button>
             ))}
           </div>
+          {article?.versions[0] &&
+            article.versions[0].id !== draft.base_version_id && (
+              <p className="notice">
+                有新版本 V{article.versions[0].number}
+                ，可在历史版本中查看或恢复；当前工作稿保留。
+                <button
+                  disabled={busy || saving || navigating}
+                  onClick={() => run(loadLatest)}
+                >
+                  载入最新版本
+                </button>
+              </p>
+            )}
           <section className="toolbar">
             <label className="titlefield">
               文章标题
@@ -1139,13 +1241,25 @@ export default function Workspace({ api, user, exitRef }) {
           {tab === "history" && (
             <section className="empty">
               <h2>不可变历史版本</h2>
+              {dirty && (
+                <p>
+                  工作稿有未保存修改，已保留在当前页面；查看历史版本不会覆盖它们。
+                </p>
+              )}
+              {!article?.versions.length && (
+                <p>
+                  暂无历史版本。自动保存只更新工作稿，请在编辑页点击“保存为版本”生成历史记录。
+                </p>
+              )}
               {article?.versions.map((v) => (
                 <button
                   className="articlecard"
                   key={v.id}
+                  disabled={busy}
                   onClick={() => run(() => pickVersion(v.id))}
                 >
                   V{v.number} · {v.title} · {labels[v.template]}
+                  {v.git_commit ? ` · GitHub ${v.git_commit.slice(0, 7)}` : ""}
                 </button>
               ))}
               {version && (

@@ -60,9 +60,14 @@ def test_upload_compressed_copies_preview_and_send_same_bytes(env):
     _, c, w, *_ = env
     aid = new(c)
     buf = io.BytesIO()
-    Image.effect_noise((1800, 1600), 100).convert("RGB").save(buf, format="WEBP", lossless=True)
+    Image.effect_noise((1800, 1600), 100).convert("RGB").save(
+        buf, format="WEBP", lossless=True
+    )
     original = buf.getvalue()
-    uploaded = c.post(f"/api/v2/articles/{aid}/assets", files={"file": ("photo.webp", original, "image/webp")})
+    uploaded = c.post(
+        f"/api/v2/articles/{aid}/assets",
+        files={"file": ("photo.webp", original, "image/webp")},
+    )
     assert uploaded.status_code == 200, uploaded.text
     a = uploaded.json()
     assert c.get(f"/api/v2/articles/{aid}/assets/{a['path']}").content == original
@@ -73,13 +78,26 @@ def test_upload_compressed_copies_preview_and_send_same_bytes(env):
         with Image.open(io.BytesIO(r.content)) as im:
             assert im.format in ("JPEG", "PNG")
     d = c.get(f"/api/v2/articles/{aid}/draft").json()
-    d = save(c, aid, d, cover=a["path"], content_json={"type":"doc", "content":[{"type":"image", "attrs":{"src":a["path"]}}]}).json()
-    vid = c.post(f"/api/v2/articles/{aid}/versions", json={"revision":d["revision"]}).json()["version_id"]
+    d = save(
+        c,
+        aid,
+        d,
+        cover=a["path"],
+        content_json={
+            "type": "doc",
+            "content": [{"type": "image", "attrs": {"src": a["path"]}}],
+        },
+    ).json()
+    vid = c.post(
+        f"/api/v2/articles/{aid}/versions", json={"revision": d["revision"]}
+    ).json()["version_id"]
     captured = []
     upload = w.upload
+
     def record(data, filename, mime, cover=False):
         captured.append((data, mime, cover))
         return upload(data, filename, mime, cover)
+
     w.upload = record
     p = c.post(f"/api/v2/versions/{vid}/prepare")
     assert p.status_code == 200, p.text
@@ -91,7 +109,7 @@ def test_upload_compressed_copies_preview_and_send_same_bytes(env):
         assert (info["role"] == "cover") == cover
     cached = c.post(f"/api/v2/versions/{vid}/prepare").json()
     assert cached == p and len(captured) == 2
-    sent = c.post(f"/api/v2/versions/{vid}/send", json={"html_hash":p["html_hash"]})
+    sent = c.post(f"/api/v2/versions/{vid}/send", json={"html_hash": p["html_hash"]})
     assert sent.status_code == 200 and len(captured) == 2
 
 
@@ -101,11 +119,153 @@ def test_legacy_prepared_preview_does_not_claim_new_compressed_images(env):
     p = c.post(f"/api/v2/versions/{vid}/prepare").json()
     calls = len(w.calls)
     with app.state.engine.begin() as conn:
-        conn.execute(update(db.publications).where(db.publications.c.version_id == vid).values(prepared_images=None))
+        conn.execute(
+            update(db.publications)
+            .where(db.publications.c.version_id == vid)
+            .values(prepared_images=None)
+        )
     old = c.post(f"/api/v2/versions/{vid}/prepare").json()
     assert old["html"] == p["html"] and old["html_hash"] == p["html_hash"]
     assert old["images"] == [] and "保存新版本" in old["compression_notice"]
     assert len(w.calls) == calls
+
+
+def test_repeated_github_import_updates_clean_draft_and_keeps_modified_draft(env):
+    import zipfile
+    import json
+
+    _, c, _, ingest, _, package = env
+
+    def changed_package(text, slug=None):
+        with zipfile.ZipFile(io.BytesIO(package)) as source:
+            files = {name: source.read(name) for name in source.namelist()}
+        files["article.md"] += ("\n\n" + text).encode()
+        manifest = json.loads(files["manifest.json"])
+        if slug:
+            manifest["slug"] = slug
+        files["manifest.json"] = json.dumps(manifest).encode()
+        out = io.BytesIO()
+        with zipfile.ZipFile(out, "w") as target:
+            for name, content in files.items():
+                target.writestr(name, content)
+        return out.getvalue()
+
+    first = ingest().json()
+    aid = first["article_id"]
+    original = c.get(f"/api/v2/articles/{aid}/draft").json()
+    second = ingest(changed_package("Incoming second version")).json()
+    latest = c.get(f"/api/v2/articles/{aid}/draft").json()
+    assert latest["base_version_id"] == second["version_id"]
+    assert "Incoming second version" in str(latest["content_json"])
+    assert latest["revision"] > original["revision"]
+    assert not c.get("/api/v1/articles").json()[0]["working_draft"]["has_changes"]
+    assert save(c, aid, original, title="stale local edit").status_code == 409
+    local = save(c, aid, latest, title="Keep local changes").json()
+    third = ingest(changed_package("Incoming third version")).json()
+    preserved = c.get(f"/api/v2/articles/{aid}/draft").json()
+    assert (
+        preserved["title"] == "Keep local changes"
+        and preserved["content_json"] == local["content_json"]
+    )
+    assert (
+        preserved["latest_version_id"] == third["version_id"]
+        and preserved["has_newer_version"]
+    )
+    restored = c.post(
+        f"/api/v2/articles/{aid}/restore/{first['version_id']}",
+        json={"revision": preserved["revision"]},
+    )
+    assert restored.status_code == 200
+    restored_again = c.get(f"/api/v2/articles/{aid}/draft").json()
+    assert restored_again["base_version_id"] == first["version_id"]
+    assert restored_again["has_newer_version"] and not restored_again["follow_latest"]
+    other = ingest(
+        changed_package("Same title different article", "same-title-other")
+    ).json()
+    listing = c.get("/api/v1/articles").json()
+    assert len(listing) == 2 and other["article_id"] != aid
+    assert len(next(a for a in listing if a["id"] == aid)["versions"]) == 3
+
+
+def test_link_title_from_editor_saves_and_escapes(env):
+    _, c, *_ = env
+    aid = new(c)
+    d = c.get(f"/api/v2/articles/{aid}/draft").json()
+    for title in (None, 'Quote "<safe>"'):
+        doc = {
+            "type": "doc",
+            "content": [
+                {
+                    "type": "paragraph",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": "Link",
+                            "marks": [
+                                {
+                                    "type": "link",
+                                    "attrs": {
+                                        "href": "https://example.com",
+                                        "title": title,
+                                    },
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ],
+        }
+        r = save(c, aid, d, content_json=doc)
+        assert r.status_code == 200, r.text
+        d = r.json()
+    vid = c.post(
+        f"/api/v2/articles/{aid}/versions", json={"revision": d["revision"]}
+    ).json()["version_id"]
+    html = c.get(f"/api/v1/versions/{vid}").json()["preview_html"]
+    assert "&lt;safe&gt;" in html and "<safe>" not in html
+
+
+def test_upgrade_preserves_existing_historical_restore(env):
+    from pathlib import Path
+    from fastapi.testclient import TestClient
+    from publisher.backend.main import create_app
+
+    app, c, w, ingest, *_ = env
+    first = ingest().json()
+    aid = first["article_id"]
+    d = c.get(f"/api/v2/articles/{aid}/draft").json()
+    d = save(c, aid, d, content_json=DOC).json()
+    second = c.post(
+        f"/api/v2/articles/{aid}/versions", json={"revision": d["revision"]}
+    ).json()
+    restored = c.post(
+        f"/api/v2/articles/{aid}/restore/{first['version_id']}",
+        json={"revision": second["revision"]},
+    ).json()
+    database = app.state.engine.url.database
+    app.state.engine.dispose()
+    with sqlite3.connect(database) as conn:
+        conn.execute("ALTER TABLE working_drafts DROP COLUMN follow_latest")
+    upgraded = create_app(Path(database).parent, testing=True, wechat=w)
+    with TestClient(upgraded, headers={"origin": "http://testserver"}) as client:
+        login = client.post(
+            "/api/v1/login", json={"username": "admin", "password": "test-password-123"}
+        ).json()
+        client.headers["x-csrf-token"] = login["csrf"]
+        d = client.get(f"/api/v2/articles/{aid}/draft").json()
+        assert (
+            d["base_version_id"] == first["version_id"]
+            and d["content_json"] == restored["content_json"]
+        )
+        assert d["has_newer_version"] and not d["follow_latest"]
+        latest = client.post(
+            f"/api/v2/articles/{aid}/restore/{second['version_id']}",
+            json={"revision": d["revision"]},
+        ).json()
+        assert latest["follow_latest"]
+        created = new(client)
+        assert client.get(f"/api/v2/articles/{created}/draft").json()["follow_latest"]
+    upgraded.state.engine.dispose()
 
 
 def test_draft_conflicts_versions_restore(env):
