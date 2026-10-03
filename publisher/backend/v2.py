@@ -20,8 +20,7 @@ from .content import read_package
 from .richtext import EMPTY, from_markdown, validate_doc, render_doc, css_for
 from .wechat import WeChatError
 from .images import publication_image, LIMITS
-
-IMAGE_UPLOAD_LIMIT = 10 * 1024**2
+from .shared_assets import install_shared_assets, read_upload, ensure_shared
 
 
 class ArticleInput(BaseModel):
@@ -59,6 +58,9 @@ def install(app, engine, blobs, lock, cfg, current, row, log, asset_map):
         }
 
     def register_asset(c, aid, sha, mime, content=None):
+        ensure_shared(
+            c, sha, mime, len(content) if content else (blobs / sha).stat().st_size
+        )
         suffix = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp"}[mime]
         name = f"uploads/{sha}.{suffix}"
         old = (
@@ -221,9 +223,11 @@ def install(app, engine, blobs, lock, cfg, current, row, log, asset_map):
             for rule in sheet:
                 if rule.type == rule.STYLE_RULE:
                     rule.selectorText = ", ".join(
-                        ".tiptap.article"
-                        if s.strip() == ".article"
-                        else ".tiptap.article " + s.strip()
+                        (
+                            ".tiptap.article"
+                            if s.strip() == ".article"
+                            else ".tiptap.article " + s.strip()
+                        )
                         for s in rule.selectorText.split(",")
                     )
             result.append({"id": name, "css": sheet.cssText.decode()})
@@ -403,7 +407,10 @@ def install(app, engine, blobs, lock, cfg, current, row, log, asset_map):
         return result
 
     def asset_details(a, aid):
-        return {**a, "publication_images": image_info(a, a["path"], f"/api/v2/articles/{aid}")}
+        return {
+            **a,
+            "publication_images": image_info(a, a["path"], f"/api/v2/articles/{aid}"),
+        }
 
     @app.get("/api/v2/articles/{aid}/publication-image/{role}/{name:path}")
     def serve_article_copy(aid: int, role: str, name: str, user=Depends(current)):
@@ -431,21 +438,7 @@ def install(app, engine, blobs, lock, cfg, current, row, log, asset_map):
 
     @app.post("/api/v2/articles/{aid}/assets")
     async def upload(aid: int, file: UploadFile = File(...), user=Depends(current)):
-        content = await file.read(IMAGE_UPLOAD_LIMIT + 1)
-        if len(content) > IMAGE_UPLOAD_LIMIT:
-            raise HTTPException(413, "图片最大10MB")
-        try:
-            with Image.open(io.BytesIO(content)) as im:
-                if (
-                    im.format not in ("PNG", "JPEG", "WEBP")
-                    or getattr(im, "is_animated", False)
-                    or im.width * im.height > 40_000_000
-                ):
-                    raise ValueError()
-                mime = Image.MIME[im.format]
-                im.verify()
-        except Exception as e:
-            raise HTTPException(422, "需要有效静态JPEG/PNG/WebP图片，最多4000万像素") from e
+        content, mime = await read_upload(file)
         sha = hashlib.sha256(content).hexdigest()
         with lock, engine.begin() as c:
             row(c, db.articles, aid)
@@ -455,6 +448,7 @@ def install(app, engine, blobs, lock, cfg, current, row, log, asset_map):
                 tmp.write_bytes(content)
                 tmp.replace(dest)
             name = register_asset(c, aid, sha, mime, content)
+            ensure_shared(c, sha, mime, len(content), file.filename)
             log(c, user["username"], "asset_uploaded", name)
             return asset_details(libmap(c, aid)[name], aid)
 
@@ -498,10 +492,29 @@ def install(app, engine, blobs, lock, cfg, current, row, log, asset_map):
             frozen = c.execute(
                 select(db.assets.c.id).where(db.assets.c.sha256 == a["sha256"])
             ).first()
-            if not live and not frozen:
+            shared = c.execute(
+                select(db.shared_assets.c.id).where(
+                    db.shared_assets.c.sha256 == a["sha256"],
+                    db.shared_assets.c.deleted_at.is_(None),
+                )
+            ).first()
+            if not live and not frozen and not shared:
                 (blobs / a["sha256"]).unlink(missing_ok=True)
             log(c, user["username"], "asset_deleted", asset_id)
         return {"ok": True}
+
+    install_shared_assets(
+        app,
+        engine,
+        blobs,
+        lock,
+        current,
+        row,
+        log,
+        register_asset,
+        image_info,
+        asset_details,
+    )
 
     @app.post("/api/v2/import/markdown")
     def import_markdown(body: MarkdownInput, user=Depends(current)):
@@ -590,7 +603,11 @@ def install(app, engine, blobs, lock, cfg, current, row, log, asset_map):
                     "html_hash": p["html_hash"],
                     "version_id": vid,
                     "images": json.loads(p["prepared_images"] or "[]"),
-                    "compression_notice": "" if p["prepared_images"] else "此预览在自动压缩功能上线前已生成，保留原发送内容；如需自动压缩请保存新版本。",
+                    "compression_notice": (
+                        ""
+                        if p["prepared_images"]
+                        else "此预览在自动压缩功能上线前已生成，保留原发送内容；如需自动压缩请保存新版本。"
+                    ),
                 }
             if p and p["status"] != "prepare_failed":
                 raise HTTPException(409, "此版本已处理，请查看微信草稿或保存新版本")
@@ -614,7 +631,13 @@ def install(app, engine, blobs, lock, cfg, current, row, log, asset_map):
             images = []
             for name, role in [(n, "body") for n in names] + [(v["cover"], "cover")]:
                 info = image_info(amap[name], name, f"/api/v2/versions/{vid}")[role]
-                images.append({**info, "name": name, "original_url": f"/api/v1/versions/{vid}/assets/{quote(name, safe='/')}"})
+                images.append(
+                    {
+                        **info,
+                        "name": name,
+                        "original_url": f"/api/v1/versions/{vid}/assets/{quote(name, safe='/')}",
+                    }
+                )
             urls = {}
             w = app.state.wechat
             for name in validate_doc(doc, amap):
@@ -664,7 +687,13 @@ def install(app, engine, blobs, lock, cfg, current, row, log, asset_map):
                     )
                 )
                 log(c, user["username"], "wechat_prepared", vid)
-            return {"html": html, "html_hash": hash, "version_id": vid, "images": images, "compression_notice": ""}
+            return {
+                "html": html,
+                "html_hash": hash,
+                "version_id": vid,
+                "images": images,
+                "compression_notice": "",
+            }
         except Exception as e:
             with engine.begin() as c:
                 c.execute(
@@ -674,9 +703,11 @@ def install(app, engine, blobs, lock, cfg, current, row, log, asset_map):
                 )
             raise HTTPException(
                 502,
-                str(e)
-                if isinstance(e, WeChatError)
-                else "微信预览准备失败，可重试；尚未创建草稿",
+                (
+                    str(e)
+                    if isinstance(e, WeChatError)
+                    else "微信预览准备失败，可重试；尚未创建草稿"
+                ),
             ) from e
 
     @app.post("/api/v2/versions/{vid}/send")

@@ -128,6 +128,104 @@ test("image caption, final confirmation and WeChat returned preview", async ({
   expect(errors).toEqual([]);
 });
 
+test("shared library uploads independently, reuses images and replaces safely", async ({
+  page,
+}) => {
+  await login(page);
+  await page.getByRole("button", { name: "共享素材库", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "共享素材库" });
+  await dialog
+    .getByLabel("上传共享素材")
+    .setInputFiles({
+      name: "Unused-purple.png",
+      mimeType: "image/png",
+      buffer: Buffer.from(
+        "iVBORw0KGgoAAAANSUhEUgAAAAcAAAAHCAIAAABLMMCEAAAAFElEQVR4nGNsYGhgwABMmEJ0FwUAnNABDvaeFeUAAAAASUVORK5CYII=",
+        "base64",
+      ),
+    });
+  const unused = dialog
+    .locator("article")
+    .filter({ has: page.getByAltText("Unused-purple.png", { exact: true }) });
+  await expect(unused).toBeVisible();
+  await expect(
+    unused.getByRole("button", { name: "插入文章", exact: true }),
+  ).toBeDisabled();
+  page.once("dialog", (d) => d.accept());
+  await unused.getByRole("button", { name: "删除素材", exact: true }).click();
+  await expect(unused).toHaveCount(0);
+  await dialog
+    .getByLabel("上传共享素材")
+    .setInputFiles(
+      path.resolve("../../inputs/wechat/acceptance/images/landscape.png"),
+    );
+  await expect(
+    dialog.getByAltText("landscape.png", { exact: true }),
+  ).toBeVisible();
+  await dialog.getByRole("button", { name: "关闭素材库" }).click();
+  await create(page, "Shared first");
+  await page.getByRole("button", { name: "共享素材库", exact: true }).click();
+  await dialog
+    .locator("article")
+    .filter({ has: page.getByAltText("landscape.png", { exact: true }) })
+    .getByRole("button", { name: "插入文章", exact: true })
+    .click();
+  const image = page.locator(".tiptap img");
+  await expect(image).toBeVisible();
+  const originalSrc = await image.getAttribute("src");
+  await image.click();
+  page.once("dialog", (d) => d.accept("Keep shared caption"));
+  await page.getByRole("button", { name: "图片说明", exact: true }).click();
+  await saved(page);
+  await create(page, "Shared second");
+  await page.getByRole("button", { name: "共享素材库", exact: true }).click();
+  await dialog
+    .locator("article")
+    .filter({ has: page.getByAltText("landscape.png", { exact: true }) })
+    .getByRole("button", { name: "插入文章", exact: true })
+    .click();
+  await expect(image).toBeVisible();
+  await saved(page);
+  const secondSrc = await image.getAttribute("src");
+  await page
+    .getByLabel("文章", { exact: true })
+    .selectOption({ label: "Shared first" });
+  await expect(page.locator(".tiptap figcaption")).toHaveText(
+    "Keep shared caption",
+  );
+  await image.click();
+  await page.getByRole("button", { name: "从共享库替换", exact: true }).click();
+  await dialog
+    .getByLabel("上传共享素材")
+    .setInputFiles(
+      path.resolve("../../inputs/wechat/acceptance/images/tall.png"),
+    );
+  const replacement = dialog
+    .locator("article")
+    .filter({ has: page.getByAltText("tall.png", { exact: true }) });
+  await expect(replacement).toBeVisible();
+  await replacement
+    .getByRole("button", { name: "替换选中图片", exact: true })
+    .click();
+  await expect(image).not.toHaveAttribute("src", originalSrc);
+  await expect(page.locator(".tiptap figcaption")).toHaveText(
+    "Keep shared caption",
+  );
+  await saved(page);
+  await page
+    .getByLabel("文章", { exact: true })
+    .selectOption({ label: "Shared second" });
+  await expect(image).toHaveAttribute("src", secondSrc);
+  await page.getByRole("button", { name: "共享素材库", exact: true }).click();
+  const used = dialog
+    .locator("article")
+    .filter({ has: page.getByAltText("landscape.png", { exact: true }) });
+  page.once("dialog", (d) => d.accept());
+  await used.getByRole("button", { name: "删除素材", exact: true }).click();
+  await expect(dialog.getByRole("alert")).toContainText("仍引用");
+  await dialog.getByRole("button", { name: "关闭素材库" }).click();
+});
+
 test("conflict reload synchronizes the visible document", async ({ page }) => {
   await login(page);
   await create(page, "Conflict acceptance");

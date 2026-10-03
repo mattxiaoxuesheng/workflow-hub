@@ -126,6 +126,18 @@ drafts = Table(
     Column("updated_at", Float),
     Column("updated_by", String),
 )
+shared_assets = Table(
+    "shared_assets",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("sha256", String, nullable=False, unique=True),
+    Column("path", String, nullable=False),
+    Column("filename", String, nullable=False),
+    Column("mime", String, nullable=False),
+    Column("size", Integer, nullable=False),
+    Column("created_at", Float),
+    Column("deleted_at", Float),
+)
 library = Table(
     "asset_library",
     metadata,
